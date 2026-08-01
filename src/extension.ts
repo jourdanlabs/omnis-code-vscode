@@ -3,7 +3,12 @@ import { ReceiptsProvider } from './receiptsView';
 import { jcodeHome, resolveEnginePath, verifyChain } from './engine';
 import { unsafeRemedy } from './protocol';
 
-export function activate(context: vscode.ExtensionContext): void {
+/** Exposed so in-host tests can inspect what the panel actually renders. */
+export interface OmnisCodeApi {
+  provider: ReceiptsProvider;
+}
+
+export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
   const provider = new ReceiptsProvider();
   const view = vscode.window.createTreeView('omnisCode.receipts', {
     treeDataProvider: provider,
@@ -49,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void provider.refresh();
+  return { provider };
 }
 
 export function deactivate(): void {
