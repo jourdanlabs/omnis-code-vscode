@@ -1,23 +1,72 @@
 import * as vscode from 'vscode';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join } from 'node:path';
 import { ReceiptsProvider } from './receiptsView';
-import { jcodeHome, resolveEnginePath, verifyChain } from './engine';
+import { ClaimsProvider } from './claimsView';
+import { CrucibleProvider } from './crucibleView';
+import {
+  jcodeHome,
+  resolveEnginePath,
+  runAgent,
+  setConfiguredEnginePath,
+  streamAgent,
+  streamScan,
+  verifyChain,
+  watchLedger,
+} from './engine';
 import { unsafeRemedy } from './protocol';
+import { availableProviders, buildTurnArgs, parseNdjsonChunk } from './turn';
 
 /** Exposed so in-host tests can inspect what the panel actually renders. */
 export interface OmnisCodeApi {
   provider: ReceiptsProvider;
+  claims: ClaimsProvider;
 }
 
 export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
+  setConfiguredEnginePath(
+    vscode.workspace.getConfiguration('omnisCode').get<string>('enginePath'),
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('omnisCode.enginePath')) {
+        setConfiguredEnginePath(
+          vscode.workspace.getConfiguration('omnisCode').get<string>('enginePath'),
+        );
+      }
+    }),
+  );
+
   const provider = new ReceiptsProvider();
+  const claims = new ClaimsProvider();
   const view = vscode.window.createTreeView('omnisCode.receipts', {
     treeDataProvider: provider,
+  });
+  const claimsView = vscode.window.createTreeView('omnisCode.claims', {
+    treeDataProvider: claims,
   });
   const output = vscode.window.createOutputChannel('OMNIS CODE');
 
   context.subscriptions.push(
     view,
+    claimsView,
     output,
+
+    vscode.commands.registerCommand('omnisCode.claims.refresh', () => claims.refresh()),
+
+    /**
+     * "Show me a refusal" — the pitch surface. The engine really refuses, and
+     * really records that refusal. This is a successful outcome, so it is not
+     * reported as an error anywhere in this flow.
+     */
+    vscode.commands.registerCommand('omnisCode.claims.showRefusal', async () => {
+      await claims.showRefusal();
+      output.appendLine('$ omnis-key claims verify --refuse-demo --json');
+      output.appendLine(claims.lastOutput.trim() || '(no stdout)');
+      output.appendLine('');
+      output.show(true);
+    }),
 
     vscode.commands.registerCommand('omnisCode.receipts.refresh', () => provider.refresh()),
 
@@ -39,6 +88,82 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
       await provider.refresh();
     }),
 
+    /**
+     * Run one OMNIS CODE turn.
+     *
+     * Provider selection is explicit and required. There is no auto-detect
+     * path here, and no "we found a key in your environment" shortcut — that
+     * is the product's stated position, so the UI must not quietly violate it.
+     */
+    vscode.commands.registerCommand('omnisCode.run', async () => {
+      const auth = await runAgent(['auth', 'status']);
+      const providers = availableProviders(auth.stdout);
+      if (providers.length === 0) {
+        output.appendLine(
+          'No provider is configured. Run `omnis-code login <provider>` and try again.',
+        );
+        output.show(true);
+        return;
+      }
+
+      const picked = await vscode.window.showQuickPick(
+        providers.map((p) => ({ label: p.id, description: p.method })),
+        { title: 'OMNIS CODE — choose a provider', placeHolder: 'Provider (required)' },
+      );
+      if (!picked) {
+        return;
+      }
+
+      const message = await vscode.window.showInputBox({
+        title: 'OMNIS CODE — run a turn',
+        prompt: 'What should the agent do?',
+      });
+      if (!message?.trim()) {
+        return;
+      }
+
+      let args: string[];
+      try {
+        args = buildTurnArgs({
+          message,
+          provider: picked.label,
+          cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        });
+      } catch (e) {
+        output.appendLine((e as Error).message);
+        output.show(true);
+        return;
+      }
+
+      output.appendLine(`$ omnis-code ${args.slice(0, 4).join(' ')} …`);
+      output.show(true);
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `OMNIS CODE turn (${picked.label})`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const run = streamAgent(
+            args,
+            (chunk) => {
+              for (const ev of parseNdjsonChunk(chunk)) {
+                output.appendLine(ev.text ? `${ev.type}: ${ev.text}` : ev.type);
+              }
+            },
+            vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+          );
+          token.onCancellationRequested(() => run.cancel());
+          const code = await run.done;
+          output.appendLine(`\nturn exited ${code ?? '—'}`);
+          // The watcher normally catches this; refresh anyway so the panel is
+          // current the instant the turn ends.
+          await provider.refresh();
+        },
+      );
+    }),
+
     vscode.commands.registerCommand('omnisCode.receipts.copyHead', async () => {
       const s = provider.current?.state;
       if (s?.kind === 'valid') {
@@ -53,8 +178,116 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
     }),
   );
 
+  /**
+   * CAIRN, natively.
+   *
+   * VS Code speaks MCP, so we hand it CAIRN's server definition rather than
+   * shelling out and re-implementing a client. We deliberately do NOT build an
+   * ask/answer panel: VS Code gives extensions no MCP *client* API (only the
+   * ability to publish server definitions), so a panel would have to
+   * re-implement the transport — and any answer it displayed while the engine
+   * was down would be a fabricated one. The chat surface owns the asking.
+   *
+   * Registration does not require CAIRN to be running; if the server script is
+   * absent we contribute nothing rather than register a definition that cannot
+   * start.
+   */
+  if (vscode.lm?.registerMcpServerDefinitionProvider) {
+    context.subscriptions.push(
+      vscode.lm.registerMcpServerDefinitionProvider('omnisCode.cairn', {
+        provideMcpServerDefinitions: async () => {
+          const script = cairnServerScript();
+          if (!script) {
+            return [];
+          }
+          return [
+            new vscode.McpStdioServerDefinition(
+              'CAIRN',
+              'node',
+              [script],
+              { CAIRN_URL: cairnUrl() },
+            ),
+          ];
+        },
+      }),
+    );
+  }
+
+  const crucible = new CrucibleProvider();
+  const crucibleView = vscode.window.createTreeView('omnisCode.crucible', {
+    treeDataProvider: crucible,
+  });
+  context.subscriptions.push(
+    crucibleView,
+
+    vscode.commands.registerCommand('omnisCode.crucible.load', () => loadCrucible(crucible)),
+
+    /**
+     * An explicit, long-running command. Never on save, never on keystroke,
+     * always cancellable, never blocking the editor.
+     */
+    vscode.commands.registerCommand('omnisCode.crucible.scan', async () => {
+      const root = vscode.workspace.workspaceFolders?.[0];
+      if (!root) {
+        void vscode.window.showInformationMessage('Open a folder to scan.');
+        return;
+      }
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'CRUCIBLE scanning this repository (30–150s)',
+          cancellable: true,
+        },
+        async (_p, token) => {
+          output.appendLine(`$ crucible-scan ${root.uri.fsPath}`);
+          output.show(true);
+          const run = streamScan(root.uri.fsPath, (c) => output.append(c));
+          token.onCancellationRequested(() => run.cancel());
+          const code = await run.done;
+          // crucible-scan exits 0 even on a bad argument, so the exit code is
+          // reported but never treated as proof the scan succeeded.
+          output.appendLine(`\nscan exited ${code ?? '—'}`);
+          await loadCrucible(crucible);
+        },
+      );
+    }),
+  );
+  void loadCrucible(crucible);
+
+  /**
+   * Live refresh. The receipts panel must reflect a new receipt without the
+   * user reloading anything, so we watch the ledger file itself rather than
+   * assuming our own commands are the only writer — a turn run in a terminal
+   * outside the editor must move the panel too.
+   */
+  const watcher = watchLedger(() => void provider.refresh());
+  context.subscriptions.push({ dispose: () => watcher.close() });
+
   void provider.refresh();
-  return { provider };
+  void claims.refresh();
+  return { provider, claims };
+}
+
+function loadCrucible(crucible: CrucibleProvider): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0];
+  return crucible.loadLatest(root ? basename(root.uri.fsPath) : '');
+}
+
+/** CAIRN's MCP entry point, if it is installed. */
+function cairnServerScript(): string | null {
+  const configured = vscode.workspace
+    .getConfiguration('omnisCode')
+    .get<string>('cairnServerScript');
+  const candidate =
+    configured?.trim() || join(homedir(), 'projects', 'cairn', 'mcp', 'server.mjs');
+  return existsSync(candidate) ? candidate : null;
+}
+
+function cairnUrl(): string {
+  return (
+    vscode.workspace.getConfiguration('omnisCode').get<string>('cairnUrl')?.trim() ||
+    'http://127.0.0.1:4611'
+  );
 }
 
 export function deactivate(): void {

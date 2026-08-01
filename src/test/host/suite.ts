@@ -111,6 +111,90 @@ test('no rendered row contains a secret-shaped string', async () => {
   }
 });
 
+// ── P2: claims ──────────────────────────────────────────────────────────────
+
+test('the claims view renders the claim chain', async () => {
+  const { claims } = await api();
+  await claims.refresh();
+  const rows = claims.getChildren();
+  const first = await claims.getTreeItem(rows[0]!);
+  const label = typeof first.label === 'string' ? first.label : '';
+  assert.ok(
+    ['CLAIM_CHAIN_VALID', 'ENGINE UNREACHABLE'].includes(label),
+    `unexpected claim chain label: ${label}`,
+  );
+  console.log(`    ↳ claims: ${label}  ${String(first.description ?? '')}`);
+});
+
+/**
+ * The product cell: a refusal renders as a verdict with its own weight, and
+ * never as an error.
+ */
+test('a refusal renders as a verdict, not an error', async () => {
+  const { claims } = await api();
+  await claims.showRefusal();
+  const summary = claims.lastSummary;
+  assert.ok(summary, 'refuse-demo produced no summary');
+  assert.ok(summary!.refused >= 1, 'expected at least one refusal');
+
+  const rows = claims.getChildren();
+  const rendered: { label: string; icon: string; context: string }[] = [];
+  for (const r of rows) {
+    const item = await claims.getTreeItem(r);
+    const label = typeof item.label === 'string' ? item.label : '';
+    const icon = item.iconPath instanceof vscode.ThemeIcon ? item.iconPath.id : '';
+    rendered.push({ label, icon, context: String(item.contextValue ?? '') });
+  }
+
+  const refusal = rendered.find((r) => r.label === 'REFUSED_NO_VERIFIER');
+  assert.ok(refusal, 'the refusal verdict was not rendered');
+  assert.equal(refusal!.icon, 'circle-slash', 'refusal must have its own mark');
+  assert.notEqual(refusal!.icon, 'error', 'a refusal must never carry the error icon');
+  assert.notEqual(refusal!.icon, 'warning', 'a refusal must never carry a warning icon');
+  assert.equal(refusal!.context, 'verdict-refusal');
+
+  const ungrounded = rendered.find((r) => r.label === 'UNGROUNDED');
+  assert.ok(ungrounded, 'the ungrounded verdict was not rendered');
+  assert.notEqual(ungrounded!.icon, 'error');
+  console.log(
+    `    ↳ refusal icon: ${refusal!.icon}   ungrounded icon: ${ungrounded!.icon}`,
+  );
+});
+
+// ── P4: CRUCIBLE + CAIRN ────────────────────────────────────────────────────
+
+test('the CRUCIBLE view resolves without triggering a scan', async () => {
+  await api();
+  const started = Date.now();
+  await vscode.commands.executeCommand('omnisCode.crucible.load');
+  assert.ok(
+    Date.now() - started < 5000,
+    'loading stored results must not run a 30–150s scan',
+  );
+});
+
+test('CRUCIBLE and turn commands are registered', async () => {
+  await api();
+  const all = await vscode.commands.getCommands(true);
+  for (const id of [
+    'omnisCode.run',
+    'omnisCode.crucible.scan',
+    'omnisCode.crucible.load',
+    'omnisCode.claims.showRefusal',
+  ]) {
+    assert.ok(all.includes(id), `command not registered: ${id}`);
+  }
+});
+
+/** CAIRN is contributed natively via MCP rather than re-implemented. */
+test('the CAIRN MCP server definition provider is available', async () => {
+  await api();
+  assert.ok(
+    typeof vscode.lm?.registerMcpServerDefinitionProvider === 'function',
+    'this VS Code build lacks the MCP definition API the extension targets',
+  );
+});
+
 export async function runAll(): Promise<void> {
   let pass = 0;
   const failures: string[] = [];

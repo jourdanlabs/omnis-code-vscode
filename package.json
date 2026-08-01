@@ -6,7 +6,7 @@
   "publisher": "jourdanlabs",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.125.0"
   },
   "categories": ["Other"],
   "keywords": ["ai", "agent", "receipts", "provenance", "audit"],
@@ -27,9 +27,23 @@
         {
           "id": "omnisCode.receipts",
           "name": "Receipts"
+        },
+        {
+          "id": "omnisCode.claims",
+          "name": "Claims"
+        },
+        {
+          "id": "omnisCode.crucible",
+          "name": "CRUCIBLE"
         }
       ]
     },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "omnisCode.cairn",
+        "label": "CAIRN — provable memory"
+      }
+    ],
     "commands": [
       {
         "command": "omnisCode.receipts.refresh",
@@ -52,10 +66,45 @@
         "command": "omnisCode.receipts.copyRemedy",
         "title": "Copy remedy command",
         "category": "OMNIS CODE"
+      },
+      {
+        "command": "omnisCode.claims.refresh",
+        "title": "Refresh claims",
+        "category": "OMNIS CODE",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "omnisCode.claims.showRefusal",
+        "title": "Show me a refusal",
+        "category": "OMNIS CODE",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "omnisCode.run",
+        "title": "Run a turn",
+        "category": "OMNIS CODE",
+        "icon": "$(play)"
+      },
+      {
+        "command": "omnisCode.crucible.scan",
+        "title": "CRUCIBLE: scan this repository",
+        "category": "OMNIS CODE",
+        "icon": "$(search)"
+      },
+      {
+        "command": "omnisCode.crucible.load",
+        "title": "CRUCIBLE: reload latest stored scan",
+        "category": "OMNIS CODE",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "omnisCode.run",
+          "when": "view == omnisCode.receipts",
+          "group": "navigation@0"
+        },
         {
           "command": "omnisCode.receipts.verify",
           "when": "view == omnisCode.receipts",
@@ -64,6 +113,26 @@
         {
           "command": "omnisCode.receipts.refresh",
           "when": "view == omnisCode.receipts",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omnisCode.claims.showRefusal",
+          "when": "view == omnisCode.claims",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omnisCode.claims.refresh",
+          "when": "view == omnisCode.claims",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omnisCode.crucible.scan",
+          "when": "view == omnisCode.crucible",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omnisCode.crucible.load",
+          "when": "view == omnisCode.crucible",
           "group": "navigation@2"
         }
       ]
@@ -75,6 +144,16 @@
           "type": "string",
           "default": "",
           "description": "Full path to the omnis-key binary. Leave empty to auto-detect. VS Code does not inherit your shell PATH on macOS, so a user-local install may need this set explicitly."
+        },
+        "omnisCode.cairnServerScript": {
+          "type": "string",
+          "default": "",
+          "description": "Path to CAIRN's MCP server entry point. Leave empty to auto-detect at ~/projects/cairn/mcp/server.mjs."
+        },
+        "omnisCode.cairnUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4611",
+          "description": "URL of the running CAIRN Studio engine."
         }
       }
     }
@@ -88,7 +167,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.125.0",
     "typescript": "^5.4.0"
   }
 }

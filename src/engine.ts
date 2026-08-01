@@ -5,8 +5,8 @@
  * Rule: engine unreachable → say `unreachable`. Never a cached, defaulted, or
  * guessed state.
  */
-import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, watch } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -76,6 +76,127 @@ function run(bin: string, args: string[]): Promise<ExecResult> {
       resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), code });
     });
   });
+}
+
+/**
+ * The configured engine path, pushed in from the view layer so this module
+ * stays free of any `vscode` import (and therefore unit-testable and portable
+ * into a Code-OSS fork).
+ */
+let configuredEnginePath: string | undefined;
+
+export function setConfiguredEnginePath(p: string | undefined): void {
+  configuredEnginePath = p;
+}
+
+export interface EngineResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  /** Populated when we could not talk to the engine at all. */
+  detail?: string;
+}
+
+/** Generic invocation. Non-zero exits are returned, never thrown or swallowed. */
+export async function runEngine(args: string[]): Promise<EngineResult> {
+  const bin = resolveEnginePath(configuredEnginePath);
+  if (!bin) {
+    return {
+      stdout: '',
+      stderr: '',
+      exitCode: null,
+      detail:
+        'omnis-key not found. Set "omnisCode.enginePath" (VS Code does not inherit your shell PATH on macOS).',
+    };
+  }
+  const res = await run(bin, args);
+  return {
+    stdout: res.stdout,
+    stderr: res.stderr,
+    exitCode: res.code,
+    detail: res.stdout.trim() ? undefined : firstLine(res.stderr.trim() || 'engine produced no output'),
+  };
+}
+
+export function resolveAgentPath(): string | null {
+  for (const p of candidateEnginePaths()) {
+    const agent = p.replace(/omnis-key$/, 'omnis-code');
+    if (existsSync(agent)) {
+      return agent;
+    }
+  }
+  return null;
+}
+
+/** Streams a long-running agent process, surfacing output as it arrives. */
+/** One-shot agent invocation (e.g. `auth status`). */
+export async function runAgent(args: string[]): Promise<EngineResult> {
+  const bin = resolveAgentPath();
+  if (!bin) {
+    return { stdout: '', stderr: '', exitCode: null, detail: 'omnis-code not found.' };
+  }
+  const res = await run(bin, args);
+  return { stdout: res.stdout, stderr: res.stderr, exitCode: res.code };
+}
+
+export function streamAgent(
+  args: string[],
+  onData: (chunk: string) => void,
+  cwd?: string,
+): { done: Promise<number | null>; cancel: () => void } {
+  const bin = resolveAgentPath();
+  if (!bin) {
+    onData('omnis-code not found. Set "omnisCode.enginePath" to its directory.\n');
+    return { done: Promise.resolve(null), cancel: () => undefined };
+  }
+  const child = spawn(bin, args, { cwd });
+  child.stdout.on('data', (d: Buffer) => onData(d.toString()));
+  child.stderr.on('data', (d: Buffer) => onData(d.toString()));
+  const done = new Promise<number | null>((resolve) => {
+    child.on('close', (code) => resolve(code));
+    child.on('error', (e) => {
+      onData(`\n${e.message}\n`);
+      resolve(null);
+    });
+  });
+  return { done, cancel: () => child.kill() };
+}
+
+export function resolveScannerPath(): string | null {
+  for (const p of candidateEnginePaths()) {
+    const s = p.replace(/omnis-key$/, 'crucible-scan');
+    if (existsSync(s)) {
+      return s;
+    }
+  }
+  return null;
+}
+
+/**
+ * Long-running CRUCIBLE scan (30–150s). Streams progress, cancellable, and
+ * never blocks. The exit code is reported but is NOT proof of success:
+ * crucible-scan exits 0 even when given a bad argument.
+ */
+export function streamScan(
+  repoPath: string,
+  onData: (chunk: string) => void,
+): { done: Promise<number | null>; cancel: () => void } {
+  const bin = resolveScannerPath();
+  if (!bin) {
+    onData('crucible-scan not found on this machine.\n');
+    return { done: Promise.resolve(null), cancel: () => undefined };
+  }
+  const child = spawn(bin, [repoPath]);
+  child.stdout.on('data', (d: Buffer) => onData(d.toString()));
+  child.stderr.on('data', (d: Buffer) => onData(d.toString()));
+  const done = new Promise<number | null>((resolve) => {
+    child.on('close', (code) => resolve(code));
+    child.on('error', (e) => {
+      onData(`\n${e.message}\n`);
+      resolve(null);
+    });
+  });
+  return { done, cancel: () => child.kill() };
 }
 
 export interface ChainReading {
@@ -149,4 +270,48 @@ export async function readEntries(env = process.env): Promise<SafeReceiptRow[]> 
 
 function firstLine(s: string): string {
   return s.split('\n')[0]!.slice(0, 300);
+}
+
+/**
+ * Watch the receipt ledger and fire when it changes.
+ *
+ * We watch the containing directory rather than the file: the ledger may not
+ * exist yet on a fresh install, and an atomic rewrite would break a watch bound
+ * to the original inode. Debounced, because one append can emit several events.
+ */
+export function watchLedger(
+  onChange: () => void,
+  env = process.env,
+  debounceMs = 150,
+): { close: () => void } {
+  const dir = join(jcodeHome(env), 'state', 'omnis-key');
+  let timer: NodeJS.Timeout | undefined;
+  let watcher: import('node:fs').FSWatcher | undefined;
+
+  const fire = (): void => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(onChange, debounceMs);
+  };
+
+  try {
+    watcher = watch(dir, (_event, filename) => {
+      if (!filename || filename.toString().startsWith('receipts.jsonl')) {
+        fire();
+      }
+    });
+  } catch {
+    // No state directory yet. The panel still works; it just will not
+    // auto-refresh until something creates one. We do not pretend otherwise.
+  }
+
+  return {
+    close: () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      watcher?.close();
+    },
+  };
 }
