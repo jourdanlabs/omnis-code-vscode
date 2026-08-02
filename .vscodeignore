@@ -1,5 +1,7 @@
 .vscode/**
 .github/**
+GATE*.md
+handoffs/**
 node_modules/**
 src/**
 out/test/**

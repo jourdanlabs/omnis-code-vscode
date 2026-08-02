@@ -17,11 +17,15 @@ import {
 } from './engine';
 import { unsafeRemedy } from './protocol';
 import { availableProviders, buildTurnArgs, parseNdjsonChunk } from './turn';
+import { SoulsProvider } from './soulsView';
+import { SoulWizard } from './soulWizard';
 
 /** Exposed so in-host tests can inspect what the panel actually renders. */
 export interface OmnisCodeApi {
   provider: ReceiptsProvider;
   claims: ClaimsProvider;
+  souls: SoulsProvider;
+  wizard: SoulWizard;
 }
 
 export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
@@ -263,9 +267,53 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
   const watcher = watchLedger(() => void provider.refresh());
   context.subscriptions.push({ dispose: () => watcher.close() });
 
+  /**
+   * MAP THE SOUL — identity, alongside action.
+   *
+   * OMNIS CODE proves what an agent did; MTS proves what it is. Additive
+   * module: the `mts` CLI is the sole authority on sealing and verification,
+   * and nothing here computes a verdict of its own.
+   */
+  const souls = new SoulsProvider();
+  const soulsTree = vscode.window.createTreeView('omnisCode.souls', {
+    treeDataProvider: souls,
+  });
+  const wizard = new SoulWizard(context.extensionUri, output, () => void souls.refresh());
+
+  context.subscriptions.push(
+    soulsTree,
+    vscode.commands.registerCommand('omnisCode.souls.refresh', () => souls.refresh()),
+    vscode.commands.registerCommand('omnisCode.souls.author', () => wizard.open()),
+
+    /**
+     * Verify on demand and put the engine's real output on the glass. A failing
+     * verification is shown, never summarised away.
+     */
+    vscode.commands.registerCommand('omnisCode.souls.verify', async () => {
+      const picked = await vscode.window.showQuickPick(
+        souls.readings.map((r) => r.soulId),
+        { title: 'MAP THE SOUL — verify a soul', placeHolder: 'soul_id' },
+      );
+      if (!picked) {
+        return;
+      }
+      const reading = await souls.verifyOne(picked);
+      output.appendLine(`$ mts soul-verify ${picked} --json`);
+      output.appendLine(
+        reading.kind === 'verdict'
+          ? reading.verdict.message
+          : `no verdict — ${reading.detail}`,
+      );
+      output.appendLine('');
+      output.show(true);
+      await souls.refresh();
+    }),
+  );
+
   void provider.refresh();
   void claims.refresh();
-  return { provider, claims };
+  void souls.refresh();
+  return { provider, claims, souls, wizard };
 }
 
 function loadCrucible(crucible: CrucibleProvider): Promise<void> {

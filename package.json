@@ -5,6 +5,14 @@
   "version": "0.1.0",
   "publisher": "jourdanlabs",
   "license": "SEE LICENSE IN LICENSE",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jourdanlabs/omnis-code-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jourdanlabs/omnis-code-vscode/issues"
+  },
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -43,6 +51,10 @@
         {
           "id": "omnisCode.crucible",
           "name": "CRUCIBLE"
+        },
+        {
+          "id": "omnisCode.souls",
+          "name": "MAP THE SOUL"
         }
       ]
     },
@@ -104,6 +116,24 @@
         "title": "CRUCIBLE: reload latest stored scan",
         "category": "OMNIS CODE",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "omnisCode.souls.author",
+        "title": "MAP THE SOUL: author a soul",
+        "category": "OMNIS CODE",
+        "icon": "$(add)"
+      },
+      {
+        "command": "omnisCode.souls.verify",
+        "title": "MAP THE SOUL: verify a soul",
+        "category": "OMNIS CODE",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "omnisCode.souls.refresh",
+        "title": "MAP THE SOUL: refresh souls",
+        "category": "OMNIS CODE",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -142,6 +172,21 @@
           "command": "omnisCode.crucible.load",
           "when": "view == omnisCode.crucible",
           "group": "navigation@2"
+        },
+        {
+          "command": "omnisCode.souls.author",
+          "when": "view == omnisCode.souls",
+          "group": "navigation@0"
+        },
+        {
+          "command": "omnisCode.souls.verify",
+          "when": "view == omnisCode.souls",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omnisCode.souls.refresh",
+          "when": "view == omnisCode.souls",
+          "group": "navigation@2"
         }
       ]
     },
@@ -162,6 +207,16 @@
           "type": "string",
           "default": "http://127.0.0.1:4611",
           "description": "URL of the running CAIRN Studio engine."
+        },
+        "omnisCode.mtsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Full path to the MAP THE SOUL (mts) CLI, or to its bin/mts.mjs entry point. Leave empty to auto-detect. The CLI is the sole authority on sealing and verifying souls; this extension never computes either."
+        },
+        "omnisCode.soulsDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory holding sealed soul packages. Leave empty to use the MTS default (MTS_SOULS_DIR, else the CLI's own souls directory)."
         }
       }
     }

@@ -2,8 +2,15 @@
 
 **Proves what it did, or refuses to say.**
 
-Your coding agent edits files and runs commands. This extension shows you the
-tamper-evident receipt chain those actions leave behind, inside the editor.
+Agent actions run through the `omnis-key` engine leave a tamper-evident receipt
+chain behind. This extension shows you that chain inside the editor — and, with
+MAP THE SOUL, the sealed identity of the agent doing the work.
+
+Identity sealed. Actions receipted. One environment.
+
+> Scope: the panels read the ledgers written by `omnis-key`. An agent that does
+> not run through that engine writes no receipts, and there is nothing here for
+> this extension to show.
 
 ---
 
@@ -25,13 +32,35 @@ a bare red dot.
 > disproved — reads as a failure.
 
 **Turns** — run one OMNIS CODE turn from the editor and watch the receipt appear.
-The panel follows the ledger, so a turn run in a terminal outside the editor moves
-it too.
+The panel watches the ledger directory, so a turn run in a terminal outside the
+editor moves it too. (On a fresh install that directory does not exist yet, so
+auto-refresh begins once the first receipt is written.)
 
 **CRUCIBLE** — an explicit, cancellable repository scan, and a results view over
 the stored scan.
 
-**CAIRN** — contributed to VS Code natively over MCP.
+**CAIRN** — contributed to VS Code natively over MCP, when CAIRN is installed
+where the extension can find it. If it is not, nothing is contributed rather
+than a definition that cannot start.
+
+**MAP THE SOUL** — author, seal, and verify an agent's identity without leaving
+the editor. Souls on this machine are listed with the verdict `mts soul-verify`
+gives them, and a soul that fails verification renders as failed.
+
+> **The `mts` CLI is the only authority.** This extension computes nothing: it
+> asks the questions, hands the answers to the CLI, and renders whatever comes
+> back. It does no hashing, sealing, signing, or validating of its own, so there
+> is only ever one implementation of what a soul is.
+
+> **A refusal is the product.** The engine will not birth a soul with fewer than
+> three specific refusals. The wizard does not suggest axioms, does not offer an
+> example, and has no skip — if you have none to give, no soul is created and
+> the engine's refusal is shown verbatim. That is the correct outcome, not an
+> error to be worked around.
+
+**Sealed is not signed.** A hash-seal proves provenance; an operator signature
+proves authenticity. They are different claims and the panel never conflates
+them — `operator-signed` appears only when the engine names a signing key.
 
 ## What this extension does not do
 
@@ -64,7 +93,7 @@ Three of these exit non-zero, and they do not mean the same thing:
 | State | Meaning |
 |---|---|
 | `RECEIPT_CHAIN_VALID` | Every entry hashes to its successor. |
-| `RECEIPT_CHAIN_INVALID` | An entry was altered after it was written. |
+| `RECEIPT_CHAIN_INVALID` | The ledger does not match its own hash chain. Entries are withheld. |
 | `RECEIPT_STATE_UNSAFE` | The ledger directory is readable by other users; the engine declines to trust it. The panel shows the exact fix. |
 | `EMPTY_NOT_YET_EVIDENCED` | Nothing recorded yet. **A new install, not a broken chain.** |
 
@@ -73,22 +102,60 @@ they are withheld, because they carry no verdict of their own.
 
 ## Requirements
 
-The `omnis-key` engine must be installed.
+The `omnis-key` engine must be installed. Individual features need more:
+
+| Feature | Also requires |
+|---|---|
+| Receipts, Claims | `omnis-key` |
+| Turns | `omnis-code`, resolved beside `omnis-key` |
+| CRUCIBLE | `crucible-scan`, resolved beside `omnis-key` |
+| MAP THE SOUL | the `mts` CLI |
+| CAIRN | a CAIRN install the extension can locate |
+
+A feature whose binary is missing says so. None of them invent a result.
 
 VS Code launched from the Dock or Finder on macOS does not inherit your shell
-`PATH`, so a user-local install at `~/.local/bin` may be invisible to it. If the
+`PATH`, so a user-local install at `~/.local/bin` may be invisible to it. If a
 panel reports the engine unreachable, set:
 
 ```jsonc
-"omnisCode.enginePath": "/Users/you/.local/bin/omnis-key"
+"omnisCode.enginePath": "/Users/you/.local/bin/omnis-key",
+"omnisCode.mtsPath": "/Users/you/.local/bin/mts"
 ```
+
+**Authoring a soul requires an operator signing key** in your login keychain.
+Without one, `mts` refuses to seal — the extension shows that refusal rather
+than producing an unsigned soul, because working around it would mean forking
+the engine's rules.
 
 ## Privacy
 
-Receipts are local and redacted at the source: the ledger records a program name
-and a hash of its arguments, never the full command line. This extension applies a
-second allowlist on top of that and never renders, logs, or caches raw commands,
-file contents, or paths. Nothing is transmitted anywhere.
+**What the panels render** passes a strict allowlist: a program name, a tool
+name, an exit code, and truncated hashes. Paths are reduced to basenames and
+token-shaped strings are replaced with `[redacted]`.
+
+**What the output channel shows is different, and deliberately so.** Verify,
+turns, scans, and soul authoring write the engine's real output to the "OMNIS
+CODE" channel, unfiltered — that is the point of it, since a verdict you cannot
+read is a verdict you have to take on faith. Be aware of what that includes:
+
+- The **claim** ledger is *not* redacted at source the way the receipt ledger
+  is. Its `verification.evidence` carries full argv, stdout/stderr excerpts, and
+  an absolute path. The claims panel reads two scalars out of it and drops the
+  rest, but `Show me a refusal` prints the engine's raw JSON to the channel.
+- A CRUCIBLE scan prints the absolute path it was given, and the scanner's own
+  output.
+- A turn prints the agent's streamed output, which can contain file contents.
+
+This extension writes nothing into your project and sends nothing over the
+network itself. It writes exactly one file, and only while authoring a soul: the
+answers you typed go to a private temp file with `0600` permissions, are passed
+to the CLI, and are deleted immediately afterwards. They are never logged, never
+cached, and never printed to the output channel.
+
+**A turn does leave your machine** — `omnis-code` sends your prompt to whichever
+model provider you explicitly select. That is the agent doing its job, not the
+panel, but it belongs in a privacy section.
 
 ## License
 

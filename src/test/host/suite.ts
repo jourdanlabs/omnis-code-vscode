@@ -74,6 +74,42 @@ test(
   },
 );
 
+/**
+ * The label was covered; the MARK was not.
+ *
+ * A fresh install reading EMPTY_NOT_YET_EVIDENCED under a red error icon still
+ * tells a new user something is wrong, whatever the words say. This assertion
+ * exists because the suite stayed green when only the label was checked.
+ */
+test(
+  'a fresh install carries no alarming mark',
+  { skip: EXPECT === 'EMPTY_NOT_YET_EVIDENCED' ? false : 'not a fresh engine-present run' },
+  async () => {
+    const { provider } = await api();
+    await provider.refresh();
+    const item = await provider.getTreeItem(provider.getChildren()[0]!);
+    const icon = item.iconPath instanceof vscode.ThemeIcon ? item.iconPath.id : '';
+    for (const alarming of ['error', 'warning', 'testing-failed-icon', 'close']) {
+      assert.notEqual(icon, alarming, `a healthy fresh install must not wear "${alarming}"`);
+    }
+    const colour =
+      item.iconPath instanceof vscode.ThemeIcon
+        ? ((item.iconPath.color as { id?: string } | undefined)?.id ?? '')
+        : '';
+    assert.ok(
+      !/failed|error/i.test(colour),
+      `a healthy fresh install must not be coloured as failed (got "${colour}")`,
+    );
+    assert.equal(String(item.contextValue), 'chain-empty');
+    assert.match(
+      String(item.tooltip ?? ''),
+      /not a broken chain/i,
+      'the tooltip must say plainly that this is not a break',
+    );
+    console.log(`    ↳ fresh-install mark: ${icon || '(none)'}  colour: ${colour || '(none)'}`);
+  },
+);
+
 /** The same first-install question for the claims panel, which got it wrong. */
 test(
   'first-run claims chain is not rendered as invalid',
@@ -266,6 +302,91 @@ test('with no engine at all, every panel says so and nothing throws', { skip: EX
   await vscode.commands.executeCommand('omnisCode.receipts.verify');
   await vscode.commands.executeCommand('omnisCode.crucible.load');
   console.log('    ↳ no-engine: all panels reported unreachable, no throw');
+});
+
+// ── MAP THE SOUL ────────────────────────────────────────────────────────────
+
+test('the souls view registers and resolves without throwing', async () => {
+  const { souls } = await api();
+  await souls.refresh();
+  const rows = souls.getChildren();
+  assert.ok(rows.length >= 1, 'souls tree produced no rows');
+  const first = await souls.getTreeItem(rows[0]!);
+  const label = typeof first.label === 'string' ? first.label : '';
+  console.log(`    ↳ souls: ${rows.length} row(s), first "${label}"`);
+});
+
+test('MAP THE SOUL commands are registered', async () => {
+  await api();
+  const all = await vscode.commands.getCommands(true);
+  for (const id of [
+    'omnisCode.souls.author',
+    'omnisCode.souls.verify',
+    'omnisCode.souls.refresh',
+  ]) {
+    assert.ok(all.includes(id), `command not registered: ${id}`);
+  }
+});
+
+/**
+ * 🔴 The probe that matters most.
+ *
+ * Drive the real wizard with two axioms against the real CLI. It must come back
+ * REFUSED, in the engine's own words, and no soul may be created. Swallowing,
+ * softening, or auto-filling past this is an outright failure.
+ */
+test('🔴 authoring with fewer than three axioms is REFUSED by the engine', async () => {
+  const { wizard } = await api();
+  const outcome = await wizard.seal({
+    fields: {
+      name: 'HostProbe',
+      naming_lineage: 'A fixture authored inside the in-host suite to prove the refusal fires.',
+      pronouns: 'they/them',
+      role: 'in-host refusal probe for the soul wizard',
+    },
+    axioms: [
+      'HostProbe will not claim a seal the CLI did not actually emit.',
+      'HostProbe will not stand in for a real soul or be treated as canon.',
+    ],
+    exemplarContext: 'Asked whether the refusal fired.',
+    exemplarOutput: 'It fired, and no soul was created.',
+  });
+
+  if (outcome.kind === 'unreachable') {
+    console.log('    ⊘ mts not installed on this machine — refusal probe inconclusive');
+    return;
+  }
+  assert.equal(outcome.kind, 'refused', `expected a refusal, got ${outcome.kind}`);
+  assert.match(
+    (outcome as { message: string }).message,
+    /fewer than 3 negative axioms/,
+    "the engine's own words must survive to the surface",
+  );
+  console.log(`    ↳ ${(outcome as { message: string }).message}`);
+});
+
+/** Rule 2, observed at the rendering layer rather than inferred from a unit. */
+test('no soul row claims to be signed without a key', async () => {
+  const { souls } = await api();
+  await souls.refresh();
+  for (const { soulId, reading } of souls.readings) {
+    if (reading?.kind !== 'verdict') {
+      continue;
+    }
+    const node = souls.getChildren().find((n) => (n as { ref?: { soulId: string } }).ref?.soulId === soulId);
+    if (!node) {
+      continue;
+    }
+    const item = await souls.getTreeItem(node);
+    const desc = String(item.description ?? '');
+    if (/operator-signed/.test(desc)) {
+      assert.ok(
+        reading.verdict.keyIds.length > 0,
+        `${soulId} rendered as operator-signed with no signing key`,
+      );
+    }
+    console.log(`    ↳ ${soulId}: ${desc}`);
+  }
 });
 
 export async function runAll(): Promise<void> {
