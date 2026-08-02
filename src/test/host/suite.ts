@@ -9,10 +9,18 @@ import { strict as assert } from 'node:assert';
 import * as vscode from 'vscode';
 import type { OmnisCodeApi } from '../../extension';
 
-type Case = { name: string; fn: () => Promise<void> | void };
+type Case = { name: string; fn: () => Promise<void> | void; skip?: string | false };
 const cases: Case[] = [];
-function test(name: string, fn: () => Promise<void> | void): void {
-  cases.push({ name, fn });
+function test(
+  name: string,
+  optsOrFn: { skip?: string | false } | (() => Promise<void> | void),
+  maybeFn?: () => Promise<void> | void,
+): void {
+  if (typeof optsOrFn === 'function') {
+    cases.push({ name, fn: optsOrFn });
+  } else {
+    cases.push({ name, fn: maybeFn!, skip: optsOrFn.skip });
+  }
 }
 
 const EXT_ID = 'jourdanlabs.omnis-code';
@@ -39,6 +47,50 @@ async function renderTree(): Promise<{ label: string; description: string }[]> {
   }
   return out;
 }
+
+/**
+ * Set OMNIS_EXPECT_STATE to assert the exact first-row verdict on a JCODE_HOME
+ * that has never existed. Declared FIRST on purpose: later tests (notably the
+ * refusal demo) write to the ledger directory, so a pristine assertion has to
+ * run before any of them.
+ */
+const EXPECT = process.env.OMNIS_EXPECT_STATE;
+
+test(
+  'first-run state matches expectation',
+  { skip: EXPECT ? false : 'not a fresh-install run' },
+  async () => {
+    const rows = await renderTree();
+    const status = rows[0]!;
+    assert.equal(status.label, EXPECT, `fresh install must read ${EXPECT}`);
+    assert.notEqual(
+      status.label,
+      'RECEIPT_CHAIN_INVALID',
+      'a fresh install must never read as tampered',
+    );
+    const entryRows = rows.slice(1).filter((r) => /^\d+\s{2}agent\./.test(r.label));
+    assert.equal(entryRows.length, 0, 'a fresh install has no entries to show');
+    console.log(`    ↳ fresh-install receipts: ${status.label}`);
+  },
+);
+
+/** The same first-install question for the claims panel, which got it wrong. */
+test(
+  'first-run claims chain is not rendered as invalid',
+  { skip: EXPECT ? false : 'not a fresh-install run' },
+  async () => {
+    const { claims } = await api();
+    await claims.refresh();
+    const first = await claims.getTreeItem(claims.getChildren()[0]!);
+    const label = typeof first.label === 'string' ? first.label : '';
+    assert.notEqual(
+      String(first.contextValue),
+      'claimchain-invalid',
+      'a fresh install must not read as a tampered claim chain',
+    );
+    console.log(`    ↳ fresh-install claims: ${label} (${String(first.contextValue)})`);
+  },
+);
 
 test('the extension activates in a real host', async () => {
   const { provider } = await api();
@@ -120,7 +172,7 @@ test('the claims view renders the claim chain', async () => {
   const first = await claims.getTreeItem(rows[0]!);
   const label = typeof first.label === 'string' ? first.label : '';
   assert.ok(
-    ['CLAIM_CHAIN_VALID', 'ENGINE UNREACHABLE'].includes(label),
+    ['CLAIM_CHAIN_VALID', 'EMPTY_NOT_YET_EVIDENCED', 'ENGINE UNREACHABLE'].includes(label),
     `unexpected claim chain label: ${label}`,
   );
   console.log(`    ↳ claims: ${label}  ${String(first.description ?? '')}`);
@@ -130,7 +182,7 @@ test('the claims view renders the claim chain', async () => {
  * The product cell: a refusal renders as a verdict with its own weight, and
  * never as an error.
  */
-test('a refusal renders as a verdict, not an error', async () => {
+test('a refusal renders as a verdict, not an error', { skip: EXPECT === 'ENGINE UNREACHABLE' ? 'no engine to refuse with' : false }, async () => {
   const { claims } = await api();
   await claims.showRefusal();
   const summary = claims.lastSummary;
@@ -195,10 +247,37 @@ test('the CAIRN MCP server definition provider is available', async () => {
   );
 });
 
+/**
+ * Someone installs from the marketplace and has never heard of omnis-key.
+ * Every panel must degrade honestly rather than crash or invent a state.
+ */
+test('with no engine at all, every panel says so and nothing throws', { skip: EXPECT === 'ENGINE UNREACHABLE' ? false : 'engine present' }, async () => {
+  const { claims } = await api();
+  await claims.refresh();
+  const claimRows = claims.getChildren();
+  const first = await claims.getTreeItem(claimRows[0]!);
+  assert.equal(
+    typeof first.label === 'string' ? first.label : '',
+    'ENGINE UNREACHABLE',
+    'claims panel must report the missing engine',
+  );
+
+  // Commands must not throw when there is nothing to talk to.
+  await vscode.commands.executeCommand('omnisCode.receipts.verify');
+  await vscode.commands.executeCommand('omnisCode.crucible.load');
+  console.log('    ↳ no-engine: all panels reported unreachable, no throw');
+});
+
 export async function runAll(): Promise<void> {
   let pass = 0;
+  let skipped = 0;
   const failures: string[] = [];
   for (const c of cases) {
+    if (c.skip) {
+      console.log(`  ⊘ ${c.name}  (${c.skip})`);
+      skipped++;
+      continue;
+    }
     try {
       await c.fn();
       console.log(`  ✔ ${c.name}`);
@@ -209,7 +288,9 @@ export async function runAll(): Promise<void> {
       failures.push(c.name);
     }
   }
-  console.log(`\n  in-host: ${pass}/${cases.length} passed`);
+  console.log(
+    `\n  in-host: ${pass}/${cases.length - skipped} passed${skipped ? ` (${skipped} skipped)` : ''}`,
+  );
   if (failures.length) {
     throw new Error(`in-host failures: ${failures.join(', ')}`);
   }

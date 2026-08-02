@@ -173,13 +173,22 @@ export function parseClaimsVerify(stdout: string): ClaimsSummary | null {
 }
 
 export interface ClaimChainState {
-  kind: 'valid' | 'invalid' | 'unreachable';
+  kind: 'valid' | 'invalid' | 'empty' | 'unsafe' | 'unreachable';
   code: string;
   entryCount?: number;
   headSha256?: string;
   detail?: string;
 }
 
+/**
+ * The claim ledger reports the same first-install state the receipt ledger does.
+ *
+ * An earlier version of this function mapped everything that was not
+ * CLAIM_CHAIN_VALID to `invalid` — which rendered a brand-new install as a
+ * tampered claim chain. That is the exact bug this codebase branches on `code`
+ * to avoid for receipts, reproduced one panel over. Caught by a fresh-install
+ * probe, not by reasoning.
+ */
 export function parseClaimsStatus(stdout: string): ClaimChainState | null {
   let env: Record<string, unknown>;
   try {
@@ -191,13 +200,24 @@ export function parseClaimsStatus(stdout: string): ClaimChainState | null {
     return null;
   }
   const data = (env.data ?? {}) as Record<string, unknown>;
-  if (env.code === 'CLAIM_CHAIN_VALID') {
-    return {
-      kind: 'valid',
-      code: env.code,
-      entryCount: Number(data.entry_count ?? 0),
-      headSha256: typeof data.head_sha256 === 'string' ? data.head_sha256 : undefined,
-    };
+  switch (env.code) {
+    case 'CLAIM_CHAIN_VALID':
+      return {
+        kind: 'valid',
+        code: env.code,
+        entryCount: Number(data.entry_count ?? 0),
+        headSha256: typeof data.head_sha256 === 'string' ? data.head_sha256 : undefined,
+      };
+    case 'EMPTY_NOT_YET_EVIDENCED':
+      return { kind: 'empty', code: env.code };
+    case 'RECEIPT_STATE_UNSAFE':
+    case 'CLAIM_STATE_UNSAFE':
+      return { kind: 'unsafe', code: env.code };
+    case 'CLAIM_CHAIN_INVALID':
+      return { kind: 'invalid', code: env.code };
+    default:
+      // An unrecognized code is not a verdict. Report it verbatim rather than
+      // guessing which side of valid/invalid it falls on.
+      return { kind: 'unreachable', code: env.code, detail: `unrecognized code ${env.code}` };
   }
-  return { kind: 'invalid', code: env.code };
 }

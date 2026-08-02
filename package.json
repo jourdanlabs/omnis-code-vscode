@@ -1,6 +1,6 @@
 {
   "name": "omnis-code",
-  "displayName": "OMNIS CODE — AI agent receipts",
+  "displayName": "OMNIS CODE \u2014 AI agent receipts",
   "description": "Proves what it did, or refuses to say.",
   "version": "0.1.0",
   "publisher": "jourdanlabs",
@@ -8,8 +8,16 @@
   "engines": {
     "vscode": "^1.125.0"
   },
-  "categories": ["Other"],
-  "keywords": ["ai", "agent", "receipts", "provenance", "audit"],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "receipts",
+    "provenance",
+    "audit"
+  ],
   "main": "./out/extension.js",
   "activationEvents": [],
   "contributes": {
@@ -41,7 +49,7 @@
     "mcpServerDefinitionProviders": [
       {
         "id": "omnisCode.cairn",
-        "label": "CAIRN — provable memory"
+        "label": "CAIRN \u2014 provable memory"
       }
     ],
     "commands": [
@@ -163,7 +171,8 @@
     "watch": "tsc -watch -p .",
     "test": "npm run compile && node --test \"out/test/*.test.js\"",
     "test:host": "npm run compile && \"/Applications/Visual Studio Code.app/Contents/MacOS/Electron\" --extensionDevelopmentPath=\"$PWD\" --extensionTestsPath=\"$PWD/out/test/host/index.js\" --no-sandbox",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test:fresh": "npm run compile && OMNIS_EXPECT_STATE=EMPTY_NOT_YET_EVIDENCED JCODE_HOME=$(mktemp -d /tmp/ojh.XXXX)/virgin \"/Applications/Visual Studio Code.app/Contents/MacOS/Electron\" --extensionDevelopmentPath=\"$PWD\" --extensionTestsPath=\"$PWD/out/test/host/index.js\" --no-sandbox"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

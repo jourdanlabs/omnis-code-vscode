@@ -157,18 +157,33 @@ export class ClaimsProvider implements vscode.TreeDataProvider<Node> {
 
 function chainItem(state: ClaimChainState): vscode.TreeItem {
   const i = new vscode.TreeItem(state.code, vscode.TreeItemCollapsibleState.None);
-  if (state.kind === 'valid') {
-    i.description = `${state.entryCount} entries  ·  ${truncateHash(state.headSha256 ?? '')}`;
-    i.tooltip = `head sha256: ${state.headSha256 ?? '—'}`;
-    i.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
-  } else if (state.kind === 'unreachable') {
-    i.label = 'ENGINE UNREACHABLE';
-    i.description = 'no verdict';
-    i.tooltip = state.detail;
-    i.iconPath = new vscode.ThemeIcon('debug-disconnect');
-  } else {
-    i.description = 'claim chain failed verification';
-    i.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+  switch (state.kind) {
+    case 'valid':
+      i.description = `${state.entryCount} entries  ·  ${truncateHash(state.headSha256 ?? '')}`;
+      i.tooltip = `head sha256: ${state.headSha256 ?? '—'}`;
+      i.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+      break;
+    case 'empty':
+      i.description = 'no claims yet';
+      i.tooltip =
+        'A healthy new install with no claims recorded yet. This is not a broken chain.';
+      i.iconPath = new vscode.ThemeIcon('circle-large-outline');
+      break;
+    case 'unsafe':
+      i.description = 'state directory permissions';
+      i.tooltip = 'The engine refused to trust the ledger directory.';
+      i.iconPath = new vscode.ThemeIcon('shield', new vscode.ThemeColor('testing.iconQueued'));
+      break;
+    case 'unreachable':
+      i.label = 'ENGINE UNREACHABLE';
+      i.description = 'no verdict';
+      i.tooltip = state.detail;
+      i.iconPath = new vscode.ThemeIcon('debug-disconnect');
+      break;
+    case 'invalid':
+      i.description = 'claim chain failed verification';
+      i.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+      break;
   }
   i.contextValue = `claimchain-${state.kind}`;
   return i;

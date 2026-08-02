@@ -163,6 +163,40 @@ test('claims status parses the real CLAIM_CHAIN_VALID envelope', () => {
   assert.equal(s.entryCount, 16);
 });
 
+/**
+ * Regression: a fresh install must not read as a tampered claim chain.
+ * This shipped broken and was caught by a fresh-install probe, not by review.
+ */
+test('an empty claim ledger is EMPTY, never invalid', () => {
+  const s = parseClaimsStatus(
+    JSON.stringify({
+      schemaVersion: 1,
+      command: 'claims status',
+      ok: false,
+      code: 'EMPTY_NOT_YET_EVIDENCED',
+      data: { entry_count: 0 },
+    }),
+  )!;
+  assert.equal(s.kind, 'empty');
+  assert.notEqual(s.kind, 'invalid');
+});
+
+test('an unsafe claim state is distinct from an invalid chain', () => {
+  const s = parseClaimsStatus(
+    JSON.stringify({ schemaVersion: 1, ok: false, code: 'RECEIPT_STATE_UNSAFE', data: null }),
+  )!;
+  assert.equal(s.kind, 'unsafe');
+});
+
+test('an unrecognized claim code yields no verdict, never invalid', () => {
+  const s = parseClaimsStatus(
+    JSON.stringify({ schemaVersion: 9, ok: true, code: 'CLAIM_SOMETHING_NEW', data: null }),
+  )!;
+  assert.equal(s.kind, 'unreachable');
+  assert.notEqual(s.kind, 'invalid');
+  assert.notEqual(s.kind, 'valid');
+});
+
 test('garbage claims output yields null, never a verdict', () => {
   assert.equal(parseClaimsVerify('command not found'), null);
   assert.equal(parseClaimsStatus(''), null);
