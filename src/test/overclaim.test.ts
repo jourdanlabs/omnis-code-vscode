@@ -84,7 +84,11 @@ test('the canonical tagline is unchanged in both README and manifest', () => {
   };
   assert.ok(readme.includes(TAGLINE), 'README must carry the canon tagline verbatim');
   assert.equal(pkg.description, TAGLINE, 'marketplace description must be the canon tagline');
-  assert.equal(pkg.displayName, 'OMNIS CODE — AI agent receipts');
+  // Captain's naming call, 2026-08-02: the IDE is OMNIS CODE (the flagship),
+  // the Rust agent is OMNIS CODE CLI, and this extension is OMNIS CODE for
+  // VS Code. Three surfaces, one name each. The pin moves with the decision —
+  // it exists so the copy cannot drift *quietly*, not so it can never change.
+  assert.equal(pkg.displayName, 'OMNIS CODE for VS Code');
   assert.equal(pkg.publisher, 'jourdanlabs');
 });
 

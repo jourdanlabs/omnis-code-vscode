@@ -1,8 +1,8 @@
 {
   "name": "omnis-code",
-  "displayName": "OMNIS CODE — AI agent receipts",
+  "displayName": "OMNIS CODE for VS Code",
   "description": "Proves what it did, or refuses to say.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "jourdanlabs",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
