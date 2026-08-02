@@ -1,6 +1,6 @@
 {
   "name": "omnis-code",
-  "displayName": "OMNIS CODE \u2014 AI agent receipts",
+  "displayName": "OMNIS CODE — AI agent receipts",
   "description": "Proves what it did, or refuses to say.",
   "version": "0.1.0",
   "publisher": "jourdanlabs",
@@ -49,7 +49,7 @@
     "mcpServerDefinitionProviders": [
       {
         "id": "omnisCode.cairn",
-        "label": "CAIRN \u2014 provable memory"
+        "label": "CAIRN — provable memory"
       }
     ],
     "commands": [
