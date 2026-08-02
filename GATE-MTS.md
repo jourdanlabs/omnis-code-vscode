@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-01 · **Builder:** Lucca 🔧🔑 · **Gate:** Pan 🐦‍⬛🔑
 **Builds on:** `fc5823e` (gated ACCEPTED) · **Spec:** `PAN-TOPH-MTS-IN-IDE-PBB-2026-08-01.md`
-**Artifact:** `omnis-code-0.1.0.vsix` (22 files, 49.72 KB)
+**Artifact:** `omnis-code-0.1.0.vsix` (22 files, 51 KB) · **Head:** `lucca/mts-in-ide`
+**Re-gate note:** check out the branch first — `git checkout lucca/mts-in-ide`.
 
 ---
 
@@ -12,10 +13,15 @@ I built this, so my passing tests are not the gate — they are the thing being
 gated. Run your own probes before reading my output.
 
 ```bash
-npm test          # 85 unit  (was 65; +20 for this module)
-npm run test:host # 16 in-host, incl. a LIVE refusal probe against the real CLI
-npm run test:fresh # virgin JCODE_HOME
+npm test           # 97 unit (was 65), incl. a REAL-BINARY tamper probe
+npm run test:host  # 17 in-host, incl. a LIVE refusal probe and the wizard opened for real
+npm run test:fresh # 20 in-host on a virgin JCODE_HOME
 ```
+
+🔴 **`npm test` shells out to the real `mts`.** The tamper probe seals a soul in a
+temp `--souls-dir` and edits it. If it cannot seal it prints
+`⊘ TAMPER PROBE DID NOT RUN` and returns — **a suite that is green without that
+line having run is a suite that did not test the finding you filed.** Grep for it.
 
 ---
 
@@ -261,6 +267,44 @@ A silent skip would have shown green. **Her point about fixtures being a summary
 of the artifact applies to skips too: a skip that reads as a pass is a summary
 of a test that never ran.**
 
+### 5b.1 — Her second HOLD, closed: the suite proved the pair, not the primary
+
+**Confirmed before fixing.** Disabling only the structural branch:
+
+```
+} else if (bedrockMatchesLock(p) === false)  →  } else if (false)
+        94 pass, 0 fail
+```
+
+Every fixture captured from a real tampered soul happens to carry the word
+TAMPER, so the *fallback* silently did the primary's job. The suite covered the
+pair and never the primary — and a green suite over dead-looking code is an
+invitation to delete `bedrockMatchesLock` as a check no test needs.
+
+**This is the same defect as the original bug, one level up: coverage passing by
+coincidence of fixture data.** She is right that I made that exact point about
+skips myself and then failed to apply it to fixtures.
+
+Fixed by giving each branch a case only it can satisfy — bedrock mismatch with
+**no tamper wording at all**, and with an **empty issue list**:
+
+| mutation | result |
+|---|---|
+| structural branch off, fallback intact | 🔴 **3 fail** |
+| fallback off, structural intact | 🔴 **1 fail** |
+| both off (the original bug) | 🔴 **6 fail** |
+
+Added in the same pass, because the inverse was also uncovered: **an intact soul
+must never be called tampered** by the structural check, or every unsigned soul
+would be accused of it.
+
+⚠️ **A fixture-coherence bug this surfaced in my own tests.** My first isolation
+fixture blanked `issues` but left `message` still reading TAMPER — a payload the
+real engine could never emit, since it derives one from the other. The parser
+only reads `issues`, so the code was fine, but **a fixture that cannot occur
+proves nothing.** The helper now rewrites both. Caught by a precondition
+assertion inside the test, which is the only reason I saw it.
+
 **Also closed her "what Pan did NOT do" list, in part:** `test:host` (17/17) and
 `test:fresh` (20/20) both run, and the wizard is now **opened in a real editor**
 with its rendered markup asserted — empty axioms box, no placeholder, no skip,
@@ -269,7 +313,7 @@ Linux, and a genuinely untrusted signature from a second operator key.
 
 ## 6 — Honest status
 
-- 94 unit + 17 in-host + 20 fresh-profile passing **on my machine, by my tests.**
+- 97 unit + 17 in-host + 20 fresh-profile passing **on my machine, by my tests.**
 - Packaged, installed locally as `jourdanlabs.omnis-code@0.1.0`, secret-swept
   over the packaged vsix (clean), no personal soul content in the artifact.
 - **Not published.** Publisher tokens and the call are the Captain's.

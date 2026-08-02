@@ -114,7 +114,7 @@ const VERIFY_SIGNED = `{"ok":true,"verdict":"VERIFIED","soul_id":"soul_1915af6c9
 
 const VERIFY_PRE_SIGNET = `{"ok":true,"verdict":"VERIFIED","soul_id":"soul_bb75a9fa2823","chain_ok":true,"chain_count":1,"signet_required":true,"signet_ok":false,"signet_key_ids":[],"signet_status":"PRE_SIGNET","pre_signet_events":[1],"issues":[],"message":"VERIFIED — soul_bb75a9fa2823 bedrock intact, chain ok (1 events) · PRE_SIGNET: event 1 sealed before any trusted key existed — unsigned by history, not by tampering"}`;
 
-const VERIFY_UNSIGNED = `{"ok":false,"verdict":"FAILED","soul_id":"soul_44c49c0559c4","chain_ok":true,"chain_count":1,"signet_required":true,"signet_ok":false,"signet_key_ids":[],"issues":["SIGNET: seal signature missing (event 1)"],"message":"FAILED — SIGNET: seal signature missing (event 1)"}`;
+const VERIFY_UNSIGNED = `{"ok":false,"verdict":"FAILED","soul_id":"soul_44c49c0559c4","bedrock_hash":"44c49c0559c4532febb0c7d4daf78cdc1fdf8b8d85ca5979f903592c484bb150","lock_hash":"44c49c0559c4532febb0c7d4daf78cdc1fdf8b8d85ca5979f903592c484bb150","chain_ok":true,"chain_count":1,"signet_required":true,"signet_ok":false,"signet_key_ids":[],"issues":["SIGNET: seal signature missing (event 1)"],"message":"FAILED — SIGNET: seal signature missing (event 1)"}`;
 
 /**
  * Captured by verifying a genuinely signed soul against a trust store that does
@@ -159,16 +159,74 @@ test('🔴 a tampered soul never reads as operator-signed, despite a valid signa
   assert.ok(!/operator-signed/.test(sealPresentation(out.verdict.seal).label));
 });
 
-test('bedrock mismatch outranks every signature branch', () => {
-  // Same tamper, but also missing its signature. Still tampering, not unsigned:
-  // the content no longer matches the seal, which is the more serious claim.
-  const both = VERIFY_TAMPERED.replace(
-    '"issues":["SIGNET: self-cert mismatch — current bedrock derives soul_c8401a4c5c11, not soul_440d4f78be8c","TAMPER: bedrock_hash mismatch","TAMPER: bedrock section §9 hash mismatch"]',
-    '"issues":["SIGNET: seal signature missing (event 1)","TAMPER: bedrock_hash mismatch"]',
+/**
+ * Replace the engine's issue list so only the structural fields can decide.
+ *
+ * Rewrites `message` alongside `issues`, because the engine derives one from
+ * the other — leaving a stale message would make the fixture state something
+ * the real engine never would, and a fixture that cannot occur proves nothing.
+ */
+function withIssues(fixture: string, issues: string[]): string {
+  const message = issues.length ? `FAILED — ${issues.join('; ')}` : 'FAILED';
+  return fixture
+    .replace(/"issues":\[[^\]]*\]/, `"issues":${JSON.stringify(issues)}`)
+    .replace(/"message":"[^"]*"/, `"message":${JSON.stringify(message)}`);
+}
+
+/**
+ * 🔴 The two mechanisms are tested SEPARATELY, on purpose.
+ *
+ * Every fixture captured from a real tampered soul happens to carry the word
+ * TAMPER, so a test that exercises both at once passes even with the structural
+ * check dead — the fallback silently does the primary's job, the primary looks
+ * like code no test needs, and the next person deletes it. That is coverage
+ * passing by coincidence of fixture data, which is exactly what hid the
+ * original bug. Each branch gets a case that ONLY it can satisfy.
+ */
+test('🔴 the structural check alone catches tampering, with no TAMPER wording present', () => {
+  // Bedrock no longer matches the lock, and the engine says nothing about
+  // tampering. Only `bedrock_hash !== lock_hash` can reach the right answer.
+  const quiet = withIssues(VERIFY_TAMPERED, ['SIGNET: seal signature missing (event 1)']);
+  assert.ok(!/TAMPER|self-cert/i.test(quiet), 'fixture must carry no tamper wording');
+
+  const out = parseVerify('x', res(quiet, 1));
+  assert.ok(out.kind === 'verdict');
+  assert.equal(
+    out.verdict.seal,
+    'tampered',
+    'bedrock mismatch must be caught structurally, not by reading the issue text',
   );
+});
+
+test('🔴 the structural check needs no issue list at all', () => {
+  const silent = withIssues(VERIFY_TAMPERED, []);
+  const out = parseVerify('x', res(silent, 1));
+  assert.ok(out.kind === 'verdict');
+  assert.equal(out.verdict.seal, 'tampered');
+});
+
+test('bedrock mismatch outranks every signature branch', () => {
+  // Tampered AND unsigned, with no tamper wording to lean on. Still tampering,
+  // not unsigned: the content no longer matches the seal, which is the more
+  // serious claim.
+  const both = withIssues(VERIFY_TAMPERED, [
+    'SIGNET: seal signature missing (event 1)',
+    'SIGNET: signer is not trusted and ACTIVE (event 1)',
+  ]);
   const out = parseVerify('x', res(both, 1));
   assert.ok(out.kind === 'verdict');
   assert.equal(out.verdict.seal, 'tampered');
+});
+
+test('an intact soul is never called tampered by the structural check', () => {
+  // The other direction: matching hashes must not trip it, or every unsigned
+  // soul would be accused of tampering.
+  const intact = VERIFY_UNSIGNED;
+  assert.ok(/"lock_hash"/.test(intact), 'fixture must state both hashes');
+  const out = parseVerify('x', res(intact, 1));
+  assert.ok(out.kind === 'verdict');
+  assert.notEqual(out.verdict.seal, 'tampered');
+  assert.equal(out.verdict.seal, 'unsigned');
 });
 
 test('a TAMPER finding is honoured even if the engine stops emitting lock_hash', () => {
