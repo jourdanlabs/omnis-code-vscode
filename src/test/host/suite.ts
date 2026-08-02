@@ -365,6 +365,39 @@ test('🔴 authoring with fewer than three axioms is REFUSED by the engine', asy
   console.log(`    ↳ ${(outcome as { message: string }).message}`);
 });
 
+/**
+ * The wizard, opened in a real editor.
+ *
+ * Everything else about this panel is proven by source greps, which prove the
+ * file and not the render. This opens it for real and reads the markup the
+ * webview was actually handed.
+ */
+test('the wizard opens in a real host and its markup offers no way past the gate', async () => {
+  await api();
+  await vscode.commands.executeCommand('omnisCode.souls.author');
+  const { wizard } = await api();
+  const html = wizard.renderedHtml;
+  assert.ok(html, 'the wizard produced no rendered markup');
+
+  assert.match(html!, /id="axioms"/, 'no axioms field in the rendered panel');
+  assert.match(
+    html!,
+    /<textarea id="axioms" rows="8"><\/textarea>/,
+    'the axioms box must render empty — no seeded example',
+  );
+  assert.ok(!/placeholder=/.test(html!), 'no ghosted example in the rendered panel');
+  for (const rx of [/>\s*Skip\b/i, /suggest/i]) {
+    assert.ok(!rx.test(html!), `the rendered panel must offer no way past the gate: ${rx}`);
+  }
+  // The seal control must not ship disabled: the engine has to get to refuse.
+  assert.ok(
+    !/id="seal"[^>]*\sdisabled/.test(html!),
+    'the seal button must not render disabled',
+  );
+  assert.match(html!, /Content-Security-Policy/, 'the webview must carry a CSP');
+  console.log(`    ↳ wizard rendered ${html!.length} bytes, axioms box empty, no skip`);
+});
+
 /** Rule 2, observed at the rendering layer rather than inferred from a unit. */
 test('no soul row claims to be signed without a key', async () => {
   const { souls } = await api();

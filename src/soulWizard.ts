@@ -49,6 +49,16 @@ export class SoulWizard {
   /** Last outcome, exposed so in-host tests assert on what really happened. */
   public lastOutcome: AuthorOutcome | null = null;
 
+  /**
+   * The markup actually handed to the webview, for in-host assertions.
+   * Reading the rendered HTML is the only way to prove the panel a user sees
+   * carries no skip and no seeded axiom — source greps prove the file, not the
+   * render.
+   */
+  public get renderedHtml(): string | null {
+    return this.panel?.webview.html ?? null;
+  }
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly output: vscode.OutputChannel,

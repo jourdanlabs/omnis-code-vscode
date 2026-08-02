@@ -205,9 +205,71 @@ This is a change to gated text, so it is flagged here rather than made quietly.
 
 ---
 
+## 5b — Pan's HOLD finding, closed (2026-08-02)
+
+**She was right, and I reproduced it before touching anything.** Sealing a real
+soul and appending one line to `soul.md`:
+
+```
+HEALTHY   ok=True  chain_ok=True  signet_ok=True  bedrock==lock: True
+TAMPERED  ok=False chain_ok=True  signet_ok=True  bedrock==lock: False
+          issues: SIGNET self-cert mismatch; TAMPER: bedrock_hash mismatch;
+                  TAMPER: bedrock section §9 hash mismatch
+```
+
+My `chainOk` branch treated "chain intact" as "not tampering." Editing a sealed
+file never touches the ledger, so that premise was simply false, and the panel
+told the user their **signature** was unverified when the engine had said TAMPER
+twice.
+
+**Fixed structurally, as she specified** — `bedrock_hash === lock_hash`, tested
+*before* every signature branch, with the text fallback beneath it.
+
+⚠️ **One deviation from her prescription, flagged not buried.** She said route to
+`broken`. I added a seventh state, `tampered`, instead of reusing `broken`.
+Reason: her own argument is that the *word* is the defect — `broken` glosses as
+"could not verify this soul", which is true but still does not tell the user the
+file was edited. `tampered` renders **"ALTERED AFTER SEALING"**. `broken` remains
+for a genuine chain failure and now says so. If she prefers strict conformance to
+the packet, collapsing the two is a one-line change.
+
+**Two things her trace surfaced that I had not considered:**
+
+1. A tampered soul carries `signet_ok: true` **and a non-empty `signet_key_ids`**
+   — the signature over the original event is still perfectly valid. Only the
+   `verified &&` guard stops it rendering as `operator-signed`. Now asserted
+   directly, because that guard is one careless reorder from a false GREEN, which
+   would be far worse than the finding she caught.
+2. `bedrock` mismatch now outranks a *simultaneously* missing signature. Both
+   findings on one soul must read as tampering: it is the more serious claim.
+
+**The real-engine test exists and is proven able to fail.** It seals into a temp
+`--souls-dir`, asserts the healthy verify first, appends a byte, asserts the file
+actually changed, and asserts `seal === 'tampered'`. With the fix reverted:
+**4 failures**, including the live probe reporting `got "unverified"` — her exact
+finding, reproduced by the suite.
+
+🔴 **And the loud skip immediately caught a bug in my own test.** My first draft
+omitted `signature`, a required Act III field, so the seal refused and the probe
+skipped having tested nothing:
+
+```
+⊘ TAMPER PROBE DID NOT RUN — REFUSED: missing required field "signature"
+```
+
+A silent skip would have shown green. **Her point about fixtures being a summary
+of the artifact applies to skips too: a skip that reads as a pass is a summary
+of a test that never ran.**
+
+**Also closed her "what Pan did NOT do" list, in part:** `test:host` (17/17) and
+`test:fresh` (20/20) both run, and the wizard is now **opened in a real editor**
+with its rendered markup asserted — empty axioms box, no placeholder, no skip,
+seal control not disabled, CSP present. Still unproven and still true: Windows,
+Linux, and a genuinely untrusted signature from a second operator key.
+
 ## 6 — Honest status
 
-- 85 unit + 16 in-host passing **on my machine, by my tests.**
+- 94 unit + 17 in-host + 20 fresh-profile passing **on my machine, by my tests.**
 - Packaged, installed locally as `jourdanlabs.omnis-code@0.1.0`, secret-swept
   over the packaged vsix (clean), no personal soul content in the artifact.
 - **Not published.** Publisher tokens and the call are the Captain's.

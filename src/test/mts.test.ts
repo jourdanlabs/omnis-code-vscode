@@ -124,6 +124,65 @@ const VERIFY_UNSIGNED = `{"ok":false,"verdict":"FAILED","soul_id":"soul_44c49c05
  */
 const VERIFY_UNTRUSTED = `{"ok":false,"verdict":"FAILED","soul_id":"soul_1915af6c9d86","chain_ok":true,"chain_count":1,"signet_required":true,"signet_ok":false,"signet_key_ids":[],"issues":["SIGNET: signer pan-ed25519-70865355708de6a6 is not trusted and ACTIVE (event 1)"],"message":"FAILED — SIGNET: signer pan-ed25519-70865355708de6a6 is not trusted and ACTIVE (event 1)"}`;
 
+/**
+ * Captured from a REAL tampered soul: sealed with the real key, then one line
+ * appended to `soul.md`.
+ *
+ * This is the combination no hand-written fixture contained, and its absence is
+ * what let a tampered soul render as a signature problem: `chain_ok: true`,
+ * `signet_ok: true`, a NON-EMPTY key id — everything about the signature is
+ * fine. Only `bedrock_hash` and `lock_hash` diverge.
+ */
+const VERIFY_TAMPERED = `{"ok":false,"verdict":"FAILED","soul_id":"soul_440d4f78be8c","bedrock_hash":"c8401a4c5c1160a79ab889ac2bb5f70cde040936e69126c00a90b7b7a88777fe","lock_hash":"440d4f78be8c97220afb9e601b5167849513fee3b84b6670d3a390f65b24dbef","chain_ok":true,"chain_count":1,"signet_required":true,"signet_ok":true,"signet_key_ids":["pan-ed25519-70865355708de6a6"],"issues":["SIGNET: self-cert mismatch — current bedrock derives soul_c8401a4c5c11, not soul_440d4f78be8c","TAMPER: bedrock_hash mismatch","TAMPER: bedrock section §9 hash mismatch"],"message":"FAILED — SIGNET: self-cert mismatch — current bedrock derives soul_c8401a4c5c11, not soul_440d4f78be8c; TAMPER: bedrock_hash mismatch; TAMPER: bedrock section §9 hash mismatch"}`;
+
+test('🔴 a tampered soul is not described as a signature problem', () => {
+  const out = parseVerify('x', res(VERIFY_TAMPERED, 1));
+  assert.ok(out.kind === 'verdict');
+  // The preconditions that made this look like a signature failure:
+  assert.equal(out.verdict.chainOk, true, 'a content edit leaves the chain intact');
+  assert.equal(out.verdict.seal, 'tampered');
+
+  const label = sealPresentation(out.verdict.seal).label;
+  for (const wrong of [/signature/i, /hash-sealed/i, /sign this/i]) {
+    assert.ok(!wrong.test(label), `a tampered soul must not read as ${wrong} (got "${label}")`);
+  }
+  assert.match(label, /ALTERED/);
+});
+
+test('🔴 a tampered soul never reads as operator-signed, despite a valid signature', () => {
+  // signet_ok is true and a key id IS named — the signature over the original
+  // event is still good. Only `verified` separates this from a healthy seal.
+  const out = parseVerify('x', res(VERIFY_TAMPERED, 1));
+  assert.ok(out.kind === 'verdict');
+  assert.ok(out.verdict.keyIds.length > 0, 'precondition: the engine still names a key');
+  assert.notEqual(out.verdict.seal, 'signed');
+  assert.ok(!/operator-signed/.test(sealPresentation(out.verdict.seal).label));
+});
+
+test('bedrock mismatch outranks every signature branch', () => {
+  // Same tamper, but also missing its signature. Still tampering, not unsigned:
+  // the content no longer matches the seal, which is the more serious claim.
+  const both = VERIFY_TAMPERED.replace(
+    '"issues":["SIGNET: self-cert mismatch — current bedrock derives soul_c8401a4c5c11, not soul_440d4f78be8c","TAMPER: bedrock_hash mismatch","TAMPER: bedrock section §9 hash mismatch"]',
+    '"issues":["SIGNET: seal signature missing (event 1)","TAMPER: bedrock_hash mismatch"]',
+  );
+  const out = parseVerify('x', res(both, 1));
+  assert.ok(out.kind === 'verdict');
+  assert.equal(out.verdict.seal, 'tampered');
+});
+
+test('a TAMPER finding is honoured even if the engine stops emitting lock_hash', () => {
+  // Structural check unavailable → fall back to the engine's own wording rather
+  // than describing a content edit as a signature problem.
+  const noLock = VERIFY_TAMPERED.replace(
+    /"lock_hash":"[0-9a-f]+",/,
+    '',
+  );
+  const out = parseVerify('x', res(noLock, 1));
+  assert.ok(out.kind === 'verdict');
+  assert.equal(out.verdict.seal, 'tampered');
+});
+
 test('the six real verify outcomes stay distinct', () => {
   const signed = parseVerify('a', res(VERIFY_SIGNED));
   const pre = parseVerify('b', res(VERIFY_PRE_SIGNET));
@@ -185,7 +244,14 @@ test('a missing signature is not rendered as a broken chain', () => {
 
 test('🔴 the word "signed" is reachable ONLY for an engine-named key', () => {
   // Rule 2, enforced at the single place the product is allowed to say it.
-  for (const seal of ['pre-signet', 'unsigned', 'untrusted', 'unverified', 'broken'] as const) {
+  for (const seal of [
+    'pre-signet',
+    'unsigned',
+    'untrusted',
+    'unverified',
+    'tampered',
+    'broken',
+  ] as const) {
     const p = sealPresentation(seal);
     assert.ok(
       !/\boperator-signed\b/.test(p.label),

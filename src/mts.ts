@@ -204,7 +204,18 @@ export function parseAuthorOutcome(res: MtsResult): AuthorOutcome {
  *   unsigned      FAILED, signature missing, chain intact    (Lucca)
  *   untrusted     FAILED, real signature by a key this machine does not trust
  *   unverified    FAILED, signature rejected for some other stated reason
- *   broken        FAILED, bedrock or chain mismatch
+ *   tampered      FAILED, bedrock no longer derives the sealed identity
+ *   broken        FAILED, the event chain itself does not verify
+ *
+ * 🔴 `tampered` is tested BEFORE any signature branch, and on a structural
+ * field rather than on issue text, because editing a sealed `soul.md` does not
+ * touch the ledger: the chain stays intact and the signature over the original
+ * event stays valid. Verified live 2026-08-02 — a tampered soul reports
+ * `chain_ok: true`, `signet_ok: true`, and `TAMPER: bedrock_hash mismatch`.
+ * Falling through to the signature branches in that state made the panel say
+ * "signature not verified", which a user reads as "I need to sign this" when
+ * the truth is "this file was edited after it was sealed". One is a chore; the
+ * other is the whole reason MAP THE SOUL exists.
  *
  * `untrusted` is NOT `unsigned`, and the difference is not pedantry. A soul
  * signed by a stranger's key reports exactly this on anyone else's machine,
@@ -223,6 +234,7 @@ export type SealKind =
   | 'unsigned'
   | 'untrusted'
   | 'unverified'
+  | 'tampered'
   | 'broken';
 
 export interface SoulVerdict {
@@ -267,8 +279,15 @@ export function parseVerify(soulId: string, res: MtsResult): VerifyReading {
     // Verified with neither a key nor a grandfather note. We do not upgrade
     // this to "signed" — absence of a key id means absence of a signature.
     seal = 'pre-signet';
+  } else if (bedrockMatchesLock(p) === false) {
+    // The soul's current bedrock no longer derives the identity that was
+    // sealed. Structural, and checked ahead of every signature branch: a
+    // tampered file leaves chain_ok and signet_ok both true, so any test based
+    // on those reads a content edit as a signature problem.
+    seal = 'tampered';
   } else if (chainOk) {
-    // Chain intact, signature problem of some kind. Never tampering.
+    // Chain intact, bedrock intact (or unstated), signature problem of some
+    // kind.
     //
     // The engine reports `verified:false, chain_ok:true, signet_key_ids:[]` for
     // BOTH a missing signature and a present-but-untrusted one, so its issue
@@ -277,7 +296,13 @@ export function parseVerify(soulId: string, res: MtsResult): VerifyReading {
     // true rather than guessing the specific one — an unrecognised wording must
     // never become a confident "signature missing".
     const said = issues.join(' ');
-    if (/not trusted|untrusted|not\s+ACTIVE/i.test(said)) {
+    // Last-resort net: if a future engine stops emitting `lock_hash` we cannot
+    // check bedrock structurally, so honour the engine's own TAMPER wording
+    // rather than describing a content edit as a signature problem. This is a
+    // fallback beneath the structural test, never the primary discriminator.
+    if (/\bTAMPER\b|self-cert mismatch/i.test(said)) {
+      seal = 'tampered';
+    } else if (/not trusted|untrusted|not\s+ACTIVE/i.test(said)) {
       seal = 'untrusted';
     } else if (/signature missing/i.test(said)) {
       seal = 'unsigned';
@@ -352,10 +377,20 @@ export function sealPresentation(seal: SealKind): {
           'The chain is intact and the engine declined the signature. Its own words are shown below; this panel will not guess at a more specific reason than it gave.',
         icon: 'unlock',
       };
+    case 'tampered':
+      return {
+        // Says the thing the user actually needs to act on. Not a signature
+        // chore — the file no longer matches what was sealed.
+        label: 'ALTERED AFTER SEALING',
+        gloss:
+          'This soul no longer matches its seal: its current bedrock derives a different identity than the one that was sealed. The ledger and signature are untouched, which is why this is not a signature problem — the file itself changed after it was sealed. The engine\'s own findings are listed below.',
+        icon: 'error',
+      };
     case 'broken':
       return {
-        label: 'FAILED',
-        gloss: 'The engine could not verify this soul. Its own words are shown below.',
+        label: 'FAILED · chain does not verify',
+        gloss:
+          'The engine could not verify this soul\'s event chain. Its own words are shown below.',
         icon: 'error',
       };
   }
@@ -494,6 +529,20 @@ export function buildNewSoulArgs(answersPath: string, soulsDirOverride?: string)
     args.push('--souls-dir', soulsDirOverride.trim());
   }
   return args;
+}
+
+/**
+ * Does the soul's current bedrock still derive the identity that was sealed?
+ *
+ * `true` / `false` when the engine states both hashes; `null` when it does not,
+ * which must be treated as "unknown" and never as "fine". Returning a bare
+ * boolean here would make a missing field look like a passing check.
+ */
+function bedrockMatchesLock(p: Record<string, any>): boolean | null {
+  if (typeof p.bedrock_hash !== 'string' || typeof p.lock_hash !== 'string') {
+    return null;
+  }
+  return p.bedrock_hash === p.lock_hash;
 }
 
 function tryParse(text: string): Record<string, any> | null {
