@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { MISSING_MTS } from './missing';
 import {
   MtsCommand,
   SoulRef,
@@ -65,8 +66,7 @@ export class SoulsProvider implements vscode.TreeDataProvider<Node> {
   async refresh(): Promise<void> {
     this.cmd = resolveMtsCommand(configuredMtsPath());
     if (!this.cmd) {
-      this.unreachable =
-        'mts not found. Set "omnisCode.mtsPath" to the MAP THE SOUL CLI (VS Code does not inherit your shell PATH on macOS).';
+      this.unreachable = MISSING_MTS;
       this.souls = [];
       this._onDidChange.fire();
       return;

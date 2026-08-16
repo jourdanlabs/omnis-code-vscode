@@ -9,7 +9,12 @@ import { execFile, spawn } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import {
+  MISSING_CRUCIBLE,
+  MISSING_OMNIS_CODE,
+  MISSING_OMNIS_KEY,
+} from './missing';
 import { ChainState, classify, parseEnvelope } from './protocol';
 import { SafeReceiptRow, parseLedger } from './ledger';
 
@@ -105,8 +110,7 @@ export async function runEngine(args: string[]): Promise<EngineResult> {
       stdout: '',
       stderr: '',
       exitCode: null,
-      detail:
-        'omnis-key not found. Set "omnisCode.enginePath" (VS Code does not inherit your shell PATH on macOS).',
+      detail: MISSING_OMNIS_KEY,
     };
   }
   const res = await run(bin, args);
@@ -118,14 +122,32 @@ export async function runEngine(args: string[]): Promise<EngineResult> {
   };
 }
 
-export function resolveAgentPath(): string | null {
+/**
+ * Locate a sibling of omnis-key (`omnis-code`, `crucible-scan`).
+ *
+ * Prefer the directory of a configured engine path so a user who pointed
+ * `omnisCode.enginePath` at a non-PATH install does not then lose the
+ * siblings that live next to it.
+ */
+export function resolveSiblingBinary(name: 'omnis-code' | 'crucible-scan'): string | null {
+  const configured = configuredEnginePath?.trim();
+  if (configured) {
+    const sibling = join(dirname(configured), name);
+    if (existsSync(sibling)) {
+      return sibling;
+    }
+  }
   for (const p of candidateEnginePaths()) {
-    const agent = p.replace(/omnis-key$/, 'omnis-code');
-    if (existsSync(agent)) {
-      return agent;
+    const sibling = p.replace(/omnis-key$/, name);
+    if (existsSync(sibling)) {
+      return sibling;
     }
   }
   return null;
+}
+
+export function resolveAgentPath(): string | null {
+  return resolveSiblingBinary('omnis-code');
 }
 
 /** Streams a long-running agent process, surfacing output as it arrives. */
@@ -133,7 +155,7 @@ export function resolveAgentPath(): string | null {
 export async function runAgent(args: string[]): Promise<EngineResult> {
   const bin = resolveAgentPath();
   if (!bin) {
-    return { stdout: '', stderr: '', exitCode: null, detail: 'omnis-code not found.' };
+    return { stdout: '', stderr: '', exitCode: null, detail: MISSING_OMNIS_CODE };
   }
   const res = await run(bin, args);
   return { stdout: res.stdout, stderr: res.stderr, exitCode: res.code };
@@ -146,7 +168,7 @@ export function streamAgent(
 ): { done: Promise<number | null>; cancel: () => void } {
   const bin = resolveAgentPath();
   if (!bin) {
-    onData('omnis-code not found. Set "omnisCode.enginePath" to its directory.\n');
+    onData(`${MISSING_OMNIS_CODE}\n`);
     return { done: Promise.resolve(null), cancel: () => undefined };
   }
   const child = spawn(bin, args, { cwd });
@@ -163,13 +185,7 @@ export function streamAgent(
 }
 
 export function resolveScannerPath(): string | null {
-  for (const p of candidateEnginePaths()) {
-    const s = p.replace(/omnis-key$/, 'crucible-scan');
-    if (existsSync(s)) {
-      return s;
-    }
-  }
-  return null;
+  return resolveSiblingBinary('crucible-scan');
 }
 
 /**
@@ -183,7 +199,7 @@ export function streamScan(
 ): { done: Promise<number | null>; cancel: () => void } {
   const bin = resolveScannerPath();
   if (!bin) {
-    onData('crucible-scan not found on this machine.\n');
+    onData(`${MISSING_CRUCIBLE}\n`);
     return { done: Promise.resolve(null), cancel: () => undefined };
   }
   const child = spawn(bin, [repoPath]);
@@ -211,8 +227,7 @@ export async function readChain(enginePath: string | null): Promise<ChainReading
     return {
       state: {
         kind: 'unreachable',
-        detail:
-          'omnis-key not found. Set "omnisCode.enginePath" to its full path (VS Code does not inherit your shell PATH on macOS).',
+        detail: MISSING_OMNIS_KEY,
       },
       exitCode: null,
       raw: '',
@@ -235,7 +250,7 @@ export async function readChain(enginePath: string | null): Promise<ChainReading
 export async function verifyChain(enginePath: string | null): Promise<ChainReading> {
   if (!enginePath) {
     return {
-      state: { kind: 'unreachable', detail: 'omnis-key not found.' },
+      state: { kind: 'unreachable', detail: MISSING_OMNIS_KEY },
       exitCode: null,
       raw: '',
     };

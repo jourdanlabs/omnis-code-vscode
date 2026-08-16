@@ -269,6 +269,7 @@ test('CRUCIBLE and turn commands are registered', async () => {
     'omnisCode.crucible.scan',
     'omnisCode.crucible.load',
     'omnisCode.claims.showRefusal',
+    'omnisCode.showMissingBinaries',
   ]) {
     assert.ok(all.includes(id), `command not registered: ${id}`);
   }
@@ -284,7 +285,7 @@ test('the CAIRN MCP server definition provider is available', async () => {
 });
 
 /**
- * Someone installs from the marketplace and has never heard of omnis-key.
+ * Someone sideloads the vsix and has never heard of omnis-key.
  * Every panel must degrade honestly rather than crash or invent a state.
  */
 test('with no engine at all, every panel says so and nothing throws', { skip: EXPECT === 'ENGINE UNREACHABLE' ? false : 'engine present' }, async () => {

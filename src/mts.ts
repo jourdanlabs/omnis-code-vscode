@@ -17,6 +17,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { MISSING_MTS } from './missing';
 
 /** Sealing runs a full interview + genesis write; it is slower than a status ping. */
 const TIMEOUT_MS = 60_000;
@@ -120,8 +121,7 @@ export async function runMts(cmd: MtsCommand | null, args: string[]): Promise<Mt
       stdout: '',
       stderr: '',
       exitCode: null,
-      detail:
-        'mts not found. Set "omnisCode.mtsPath" to the MAP THE SOUL CLI (VS Code does not inherit your shell PATH on macOS).',
+      detail: MISSING_MTS,
     };
   }
   return run(cmd, args);

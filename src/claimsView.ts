@@ -143,6 +143,13 @@ export class ClaimsProvider implements vscode.TreeDataProvider<Node> {
       for (const outcome of s.outcomes) {
         nodes.push({ t: 'outcome', outcome });
       }
+    } else if (this.chain.kind === 'unreachable') {
+      nodes.push({
+        t: 'note',
+        label: 'omnis-key not found',
+        detail: this.chain.detail,
+        icon: new vscode.ThemeIcon('debug-disconnect'),
+      });
     } else if (this.chain.kind === 'valid') {
       nodes.push({
         t: 'note',
