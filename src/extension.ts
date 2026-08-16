@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import { ReceiptsProvider } from './receiptsView';
 import { ClaimsProvider } from './claimsView';
 import { CrucibleProvider } from './crucibleView';
 import {
   jcodeHome,
+  resolveAgentPath,
   resolveEnginePath,
+  resolveScannerPath,
   runAgent,
   setConfiguredEnginePath,
   streamAgent,
@@ -15,6 +15,15 @@ import {
   verifyChain,
   watchLedger,
 } from './engine';
+import {
+  MISSING_CAIRN,
+  MISSING_CRUCIBLE,
+  MISSING_MTS,
+  MISSING_OMNIS_CODE,
+  MISSING_OMNIS_KEY,
+  resolveCairnScript,
+} from './missing';
+import { resolveMtsCommand } from './mts';
 import { unsafeRemedy } from './protocol';
 import { availableProviders, buildTurnArgs, parseNdjsonChunk } from './turn';
 import { SoulsProvider } from './soulsView';
@@ -32,15 +41,37 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
   setConfiguredEnginePath(
     vscode.workspace.getConfiguration('omnisCode').get<string>('enginePath'),
   );
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('omnisCode.enginePath')) {
-        setConfiguredEnginePath(
-          vscode.workspace.getConfiguration('omnisCode').get<string>('enginePath'),
-        );
-      }
-    }),
-  );
+  const output = vscode.window.createOutputChannel('OMNIS CODE');
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
+  status.command = 'omnisCode.showMissingBinaries';
+  context.subscriptions.push(output, status);
+
+  const reportMissing = (): void => {
+    setConfiguredEnginePath(
+      vscode.workspace.getConfiguration('omnisCode').get<string>('enginePath'),
+    );
+    const missing = missingBinaries();
+    if (missing.length === 0) {
+      status.hide();
+      return;
+    }
+    const names = missing.map((m) => m.binary).join(', ');
+    status.text = `OMNIS · ${names} missing`;
+    status.tooltip = missing.map((m) => m.detail).join('\n');
+    status.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    status.show();
+  };
+
+  const onPathsChanged = (e: vscode.ConfigurationChangeEvent): void => {
+    if (
+      e.affectsConfiguration('omnisCode.enginePath') ||
+      e.affectsConfiguration('omnisCode.mtsPath') ||
+      e.affectsConfiguration('omnisCode.cairnServerScript')
+    ) {
+      reportMissing();
+    }
+  };
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(onPathsChanged));
 
   const provider = new ReceiptsProvider();
   const claims = new ClaimsProvider();
@@ -50,12 +81,10 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
   const claimsView = vscode.window.createTreeView('omnisCode.claims', {
     treeDataProvider: claims,
   });
-  const output = vscode.window.createOutputChannel('OMNIS CODE');
 
   context.subscriptions.push(
     view,
     claimsView,
-    output,
 
     vscode.commands.registerCommand('omnisCode.claims.refresh', () => claims.refresh()),
 
@@ -101,6 +130,11 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
      */
     vscode.commands.registerCommand('omnisCode.run', async () => {
       const auth = await runAgent(['auth', 'status']);
+      if (auth.detail && !auth.stdout.trim()) {
+        output.appendLine(auth.detail);
+        output.show(true);
+        return;
+      }
       const providers = availableProviders(auth.stdout);
       if (providers.length === 0) {
         output.appendLine(
@@ -200,7 +234,9 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
     context.subscriptions.push(
       vscode.lm.registerMcpServerDefinitionProvider('omnisCode.cairn', {
         provideMcpServerDefinitions: async () => {
-          const script = cairnServerScript();
+          const script = resolveCairnScript(
+            vscode.workspace.getConfiguration('omnisCode').get<string>('cairnServerScript'),
+          );
           if (!script) {
             return [];
           }
@@ -310,6 +346,56 @@ export function activate(context: vscode.ExtensionContext): OmnisCodeApi {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('omnisCode.showMissingBinaries', () => {
+      const missing = missingBinaries();
+      output.appendLine('OMNIS CODE binary status');
+      if (missing.length === 0) {
+        output.appendLine('omnis-key, omnis-code, crucible-scan, mts, cairn: found.');
+      } else {
+        for (const m of missing) {
+          output.appendLine(`${m.binary}: ${m.detail}`);
+        }
+      }
+      output.appendLine('');
+      output.show(true);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('omnisCode.enginePath')) {
+        void provider.refresh();
+        void claims.refresh();
+        void loadCrucible(crucible);
+      }
+      if (e.affectsConfiguration('omnisCode.mtsPath') || e.affectsConfiguration('omnisCode.soulsDir')) {
+        void souls.refresh();
+      }
+    }),
+  );
+
+  reportMissing();
+  const missing = missingBinaries();
+  if (missing.some((m) => m.binary === 'omnis-key')) {
+    output.appendLine(MISSING_OMNIS_KEY);
+    output.appendLine('');
+    output.show(true);
+    void vscode.window.showWarningMessage(MISSING_OMNIS_KEY, 'Open Settings').then((choice) => {
+      if (choice === 'Open Settings') {
+        void vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          'omnisCode.enginePath',
+        );
+      }
+    });
+  } else if (missing.length > 0) {
+    for (const m of missing) {
+      output.appendLine(m.detail);
+    }
+    output.appendLine('');
+  }
+
   void provider.refresh();
   void claims.refresh();
   void souls.refresh();
@@ -321,14 +407,25 @@ function loadCrucible(crucible: CrucibleProvider): Promise<void> {
   return crucible.loadLatest(root ? basename(root.uri.fsPath) : '');
 }
 
-/** CAIRN's MCP entry point, if it is installed. */
-function cairnServerScript(): string | null {
-  const configured = vscode.workspace
-    .getConfiguration('omnisCode')
-    .get<string>('cairnServerScript');
-  const candidate =
-    configured?.trim() || join(homedir(), 'projects', 'cairn', 'mcp', 'server.mjs');
-  return existsSync(candidate) ? candidate : null;
+function missingBinaries(): { binary: string; detail: string }[] {
+  const cfg = vscode.workspace.getConfiguration('omnisCode');
+  const out: { binary: string; detail: string }[] = [];
+  if (!resolveEnginePath(cfg.get<string>('enginePath'))) {
+    out.push({ binary: 'omnis-key', detail: MISSING_OMNIS_KEY });
+  }
+  if (!resolveAgentPath()) {
+    out.push({ binary: 'omnis-code', detail: MISSING_OMNIS_CODE });
+  }
+  if (!resolveScannerPath()) {
+    out.push({ binary: 'crucible-scan', detail: MISSING_CRUCIBLE });
+  }
+  if (!resolveMtsCommand(cfg.get<string>('mtsPath'))) {
+    out.push({ binary: 'mts', detail: MISSING_MTS });
+  }
+  if (!resolveCairnScript(cfg.get<string>('cairnServerScript'))) {
+    out.push({ binary: 'cairn', detail: MISSING_CAIRN });
+  }
+  return out;
 }
 
 function cairnUrl(): string {

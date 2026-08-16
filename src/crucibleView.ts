@@ -3,6 +3,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ScanResult, ageLabel, isStale, newestScanDir, parsePipeline } from './crucible';
+import { resolveScannerPath } from './engine';
+import { MISSING_CRUCIBLE } from './missing';
 
 type Node = HeaderNode | FindingNode | NoteNode;
 
@@ -31,6 +33,7 @@ export class CrucibleProvider implements vscode.TreeDataProvider<Node> {
 
   private scan: ScanResult | null = null;
   private note: string | null = 'No scan loaded.';
+  private scannerMissing = false;
 
   get current(): ScanResult | null {
     return this.scan;
@@ -41,12 +44,15 @@ export class CrucibleProvider implements vscode.TreeDataProvider<Node> {
    * a 30–150s job does not run because a view became visible.
    */
   async loadLatest(repoName: string): Promise<void> {
+    this.scannerMissing = !resolveScannerPath();
     try {
       const dirs = await readdir(scansRoot());
       const newest = newestScanDir(dirs, repoName);
       if (!newest) {
         this.scan = null;
-        this.note = `No stored scan for "${repoName}". Run "CRUCIBLE: scan this repository".`;
+        this.note = this.scannerMissing
+          ? MISSING_CRUCIBLE
+          : `No stored scan for "${repoName}". Run "CRUCIBLE: scan this repository".`;
       } else {
         const raw = await readFile(join(scansRoot(), newest, 'pipeline.json'), 'utf8');
         const parsed = parsePipeline(newest, raw);
@@ -55,7 +61,9 @@ export class CrucibleProvider implements vscode.TreeDataProvider<Node> {
       }
     } catch {
       this.scan = null;
-      this.note = 'No scans directory yet. Run a scan to create one.';
+      this.note = this.scannerMissing
+        ? MISSING_CRUCIBLE
+        : 'No scans directory yet. Run a scan to create one.';
     }
     this._onDidChange.fire();
   }
@@ -109,6 +117,16 @@ export class CrucibleProvider implements vscode.TreeDataProvider<Node> {
   }
 
   getChildren(): Node[] {
+    if (this.scannerMissing && !this.scan) {
+      return [
+        {
+          t: 'note',
+          label: 'CRUCIBLE-SCAN UNREACHABLE',
+          detail: MISSING_CRUCIBLE,
+          icon: new vscode.ThemeIcon('debug-disconnect'),
+        },
+      ];
+    }
     if (!this.scan) {
       return [
         {
@@ -118,7 +136,16 @@ export class CrucibleProvider implements vscode.TreeDataProvider<Node> {
         },
       ];
     }
-    const nodes: Node[] = [{ t: 'header', scan: this.scan }];
+    const nodes: Node[] = [];
+    if (this.scannerMissing) {
+      nodes.push({
+        t: 'note',
+        label: 'CRUCIBLE-SCAN UNREACHABLE',
+        detail: MISSING_CRUCIBLE,
+        icon: new vscode.ThemeIcon('debug-disconnect'),
+      });
+    }
+    nodes.push({ t: 'header', scan: this.scan });
     if (isStale(this.scan.scannedAt, new Date())) {
       nodes.push({
         t: 'note',

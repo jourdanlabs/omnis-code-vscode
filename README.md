@@ -14,6 +14,25 @@ Identity sealed. Actions receipted. One environment.
 
 ---
 
+## Install
+
+This extension is not listed on the Visual Studio Marketplace. Download
+`omnis-code-0.1.2.vsix` from the
+[latest GitHub Release](https://github.com/jourdanlabs/omnis-code-vscode/releases/latest),
+then:
+
+```bash
+code --install-extension omnis-code-0.1.2.vsix
+```
+
+Or use the Command Palette: **Extensions: Install from VSIX…**
+
+The panels still need the `omnis-key` engine (and, for each extra surface, its
+own binary). A missing binary is reported by name, with the setting that locates
+it. That report is the correct outcome, not a broken install.
+
+---
+
 ## What this extension does
 
 **Receipts** — the live chain state (`RECEIPT_CHAIN_VALID`, `RECEIPT_CHAIN_INVALID`,

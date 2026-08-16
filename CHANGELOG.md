@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-08-16
+
+Stranger-usable install. The extension is still an observer: it does not block
+writes, and it still invents no receipts, hashes, or verdicts.
+
+### Added
+
+- GitHub Release workflow that attaches a built `omnis-code-x.y.z.vsix`.
+- README install: download that vsix, then
+  `code --install-extension omnis-code-0.1.2.vsix`. No Marketplace listing.
+- Activation names a missing `omnis-key` and points at `omnisCode.enginePath`.
+  The same honesty applies to `omnis-code`, `crucible-scan`, `mts`, and `cairn`.
+- Status bar lists missing binaries. No green mark for "binary found".
+- `omnisCode.showMissingBinaries` writes the named-binary report to the
+  output channel.
+
+### Fixed
+
+- `omnis-code` / `crucible-scan` now resolve beside a configured
+  `omnisCode.enginePath`, not only the PATH probe list.
+- A turn with no `omnis-code` binary no longer pretends no provider is
+  configured.
+- CRUCIBLE names `crucible-scan` when that binary is missing, instead of
+  implying a scan can be run.
+- Claims panel surfaces the missing-engine detail, not only a banner.
+
+## [0.1.1] — 2026-08-02
+
+MAP THE SOUL in the extension. The `mts` CLI remains the only authority on
+sealing and verification. Packaged locally; not published.
+
 ## [0.1.0] — 2026-08-01
 
 First release.

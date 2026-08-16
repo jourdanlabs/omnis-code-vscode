@@ -2,7 +2,7 @@
   "name": "omnis-code",
   "displayName": "OMNIS CODE for VS Code",
   "description": "Proves what it did, or refuses to say.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "jourdanlabs",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -27,7 +27,9 @@
     "audit"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -134,6 +136,11 @@
         "title": "MAP THE SOUL: refresh souls",
         "category": "OMNIS CODE",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "omnisCode.showMissingBinaries",
+        "title": "Show missing binaries",
+        "category": "OMNIS CODE"
       }
     ],
     "menus": {
@@ -226,12 +233,13 @@
     "watch": "tsc -watch -p .",
     "test": "npm run compile && node --test \"out/test/*.test.js\"",
     "test:host": "npm run compile && \"/Applications/Visual Studio Code.app/Contents/MacOS/Electron\" --extensionDevelopmentPath=\"$PWD\" --extensionTestsPath=\"$PWD/out/test/host/index.js\" --no-sandbox",
-    "package": "vsce package",
+    "package": "vsce package --no-dependencies",
     "test:fresh": "npm run compile && OMNIS_EXPECT_STATE=EMPTY_NOT_YET_EVIDENCED JCODE_HOME=$(mktemp -d /tmp/ojh.XXXX)/virgin \"/Applications/Visual Studio Code.app/Contents/MacOS/Electron\" --extensionDevelopmentPath=\"$PWD\" --extensionTestsPath=\"$PWD/out/test/host/index.js\" --no-sandbox"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.6.0",
     "typescript": "^5.4.0"
   }
 }
